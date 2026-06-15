@@ -28,12 +28,13 @@ CREATE TABLE clickhouse_orders (
     status STRING,
     amount DECIMAL(12, 2),
     created_at TIMESTAMP(3),
-    updated_at TIMESTAMP(3)
+    updated_at TIMESTAMP(3),
+    PRIMARY KEY (order_id) NOT ENFORCED
 ) WITH (
-    'connector' = 'jdbc',
-    'url' = 'jdbc:clickhouse://clickhouse:8123/cdc_demo',
+    'connector' = 'clickhouse',
+    'url' = 'clickhouse://clickhouse:8123',
+    'database-name' = 'cdc_demo',
     'table-name' = 'orders_sink',
-    'driver' = 'com.clickhouse.jdbc.ClickHouseDriver',
     'username' = 'default',
     'password' = ''
 );
