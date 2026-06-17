@@ -11,14 +11,14 @@ CREATE TABLE postgres_orders (
     PRIMARY KEY (order_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'postgres',
+    'hostname' = 'pg-primary',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
     'database-name' = 'cdc_demo',
     'schema-name' = 'public',
     'table-name' = 'orders',
-    'slot.name' = 'flink_orders_slot',
+    'slot.name' = 'flink_orders_slot_ha',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -36,8 +36,10 @@ CREATE TABLE clickhouse_orders (
     'database-name' = 'cdc_demo',
     'table-name' = 'orders_sink',
     'username' = 'default',
-    'password' = ''
+    'password' = '',
+    'sink.update-strategy' = 'insert'  -- Chuyển các bản ghi UPDATE_AFTER thành INSERT
 );
+
 
 INSERT INTO clickhouse_orders
 SELECT

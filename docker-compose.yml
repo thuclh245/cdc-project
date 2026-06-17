@@ -19,6 +19,8 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - cdc-network
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -33,6 +35,8 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - cdc-network
 
   flink-jobmanager:
     build:
@@ -47,6 +51,8 @@ services:
     volumes:
       - ./flink/jobs:/opt/flink/jobs
       - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - cdc-network
 
   flink-taskmanager:
     build:
@@ -61,6 +67,8 @@ services:
     volumes:
       - ./flink/jobs:/opt/flink/jobs
       - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - cdc-network
 
   pg-primary:
     image: postgres:16
@@ -84,11 +92,12 @@ services:
     volumes:
       - pg_primary_data:/var/lib/postgresql/data
       - ./postgres-ha/primary-init:/docker-entrypoint-initdb.d
+    networks:
+      - cdc-network
 
   pg-replica-1:
     image: postgres:16
     container_name: pg-replica-1
-    user: postgres
     environment:
       PGPASSWORD: repl_password
     volumes:
@@ -97,25 +106,27 @@ services:
       bash -c "
       if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
         echo 'Waiting for primary...';
-        until pg_isready -h pg-primary -p 5432 -U postgres; do
+        until gosu postgres pg_isready -h pg-primary -p 5432 -U postgres; do
           sleep 2;
         done;
         echo 'Running pg_basebackup...';
         rm -rf /var/lib/postgresql/data/*;
-        pg_basebackup -h pg-primary -p 5432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
+        gosu postgres pg_basebackup -h pg-primary -p 5432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
+        chmod 700 /var/lib/postgresql/data;
         echo 'Basebackup done.';
       fi;
-      postgres
+      exec gosu postgres postgres
       "
     depends_on:
       - pg-primary
     networks:
       - cdc-network
+    ports:
+      - "5434:5432"
 
   pg-replica-2:
     image: postgres:16
     container_name: pg-replica-2
-    user: postgres
     environment:
       PGPASSWORD: repl_password
     volumes:
@@ -124,18 +135,36 @@ services:
       bash -c "
       if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
         echo 'Waiting for primary...';
-        until pg_isready -h pg-primary -p 5432 -U postgres; do
+        until gosu postgres pg_isready -h pg-primary -p 5432 -U postgres; do
           sleep 2;
         done;
         echo 'Running pg_basebackup...';
         rm -rf /var/lib/postgresql/data/*;
-        pg_basebackup -h pg-primary -p 5432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
+        gosu postgres pg_basebackup -h pg-primary -p 5432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
+        chmod 700 /var/lib/postgresql/data;
         echo 'Basebackup done.';
       fi;
-      postgres
+      exec gosu postgres postgres
       "
     depends_on:
       - pg-primary
+    networks:
+      - cdc-network
+    ports:
+      - "5435:5432"
+
+  pg-haproxy:
+    image: haproxy:2.9
+    container_name: pg-haproxy
+    depends_on:
+      - pg-primary
+      - pg-replica-1
+      - pg-replica-2
+    ports:
+      - "15432:5432"
+      - "15433:5433"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks:
       - cdc-network
 
