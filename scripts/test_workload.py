@@ -35,9 +35,10 @@ for i in range(1000):
     order_id = random.randint(1000, 101000)
 
     cur.execute("""
-        DELETE FROM orders
+        UPDATE orders
+        SET deleted = TRUE, updated_at = %s
         WHERE order_id = %s
-    """, (order_id,))
+    """, (datetime.now(), order_id))
     
     if (i + 1) % 200 == 0:
         print(f"Processed {i + 1} deletes")
