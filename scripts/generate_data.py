@@ -25,8 +25,8 @@ for i in range(start_id, start_id + num_rows):
     amount = round(random.uniform(10000, 5000000), 2)
 
     cur.execute("""
-        INSERT INTO orders(order_id, customer_id, status, amount, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO orders(order_id, customer_id, status, amount, created_at, updated_at, deleted)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (order_id) DO NOTHING
     """, (
         i,
@@ -34,7 +34,8 @@ for i in range(start_id, start_id + num_rows):
         status,
         amount,
         datetime.now(),
-        datetime.now()
+        datetime.now(),
+        False
     ))
 
     if i % 1000 == 0:
