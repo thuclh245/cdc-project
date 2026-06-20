@@ -45,7 +45,13 @@ services:
     container_name: flink-jobmanager
     ports:
       - "8081:8081"
-    command: jobmanager
+    command: >
+      bash -c "
+      /docker-entrypoint.sh jobmanager &
+      sleep 30 &&
+      sql-client.sh -f /opt/flink/jobs/postgres_to_clickhouse.sql &&
+      wait
+      "
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
     volumes:

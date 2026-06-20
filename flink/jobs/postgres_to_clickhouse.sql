@@ -8,6 +8,7 @@ CREATE TABLE postgres_orders (
     amount DECIMAL(12, 2),
     created_at TIMESTAMP(3),
     updated_at TIMESTAMP(3),
+    deleted BOOLEAN,
     PRIMARY KEY (order_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
@@ -29,6 +30,7 @@ CREATE TABLE clickhouse_orders (
     amount DECIMAL(12, 2),
     created_at TIMESTAMP(3),
     updated_at TIMESTAMP(3),
+    deleted INT,
     PRIMARY KEY (order_id) NOT ENFORCED
 ) WITH (
     'connector' = 'clickhouse',
@@ -37,7 +39,7 @@ CREATE TABLE clickhouse_orders (
     'table-name' = 'orders_sink',
     'username' = 'default',
     'password' = '',
-    'sink.update-strategy' = 'insert'  -- Chuyển các bản ghi UPDATE_AFTER thành INSERT
+    'sink.update-strategy' = 'insert'  
 );
 
 
@@ -48,5 +50,6 @@ SELECT
     status,
     amount,
     created_at,
-    updated_at
+    updated_at,
+    CAST(deleted AS INT) AS deleted
 FROM postgres_orders;
