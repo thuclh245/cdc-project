@@ -41,6 +41,27 @@ Savepoint là snapshot trạng thái được tạo thủ công, dùng khi:
 
 ## 4. Cấu hình checkpoint đề xuất
 
+Docker Compose truyền cùng cấu hình sau vào cả JobManager và TaskManager qua
+`FLINK_PROPERTIES`:
+
+```yaml
+restart-strategy.type: fixed-delay
+restart-strategy.fixed-delay.attempts: 3
+restart-strategy.fixed-delay.delay: 10 s
+state.backend.type: hashmap
+state.checkpoints.dir: file:///opt/flink/checkpoints
+execution.checkpointing.interval: 10 s
+execution.checkpointing.mode: EXACTLY_ONCE
+execution.checkpointing.timeout: 60 s
+execution.checkpointing.max-concurrent-checkpoints: 1
+```
+
+Thư mục `/opt/flink/checkpoints` được mount bằng named volume
+`flink_checkpoints` trên cả hai container. Cấu hình này bảo đảm Flink có state
+để phục hồi khi TaskManager bị restart. Nó không đồng nghĩa với HA cho
+JobManager và không tự động chứng minh exactly-once end-to-end của ClickHouse
+sink.
+
 Trong dự án có volume:
 
 ```yaml

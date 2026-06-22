@@ -41,6 +41,25 @@ SELECT COUNT(*) FROM orders;
 
 ## Test data
 
+Các script Python dùng chung cấu hình PostgreSQL dưới đây và mặc định ghi trực tiếp
+vào `pg-primary` qua host port `5433`:
+
+```bash
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5433
+export POSTGRES_DB=cdc_demo
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=postgres
+```
+
+Nếu muốn mọi workload đi qua HAProxy write endpoint, chỉ đổi:
+
+```bash
+export POSTGRES_PORT=15432
+```
+
+Sau đó chạy generator/workload trong cùng terminal.
+
 ```sql
 INSERT INTO orders(order_id, customer_id, status, amount)
 VALUES (950001, 500, 'CREATED', 150000);

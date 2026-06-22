@@ -1,3 +1,15 @@
+x-flink-properties: &flink-properties |
+  jobmanager.rpc.address: flink-jobmanager
+  restart-strategy.type: fixed-delay
+  restart-strategy.fixed-delay.attempts: 3
+  restart-strategy.fixed-delay.delay: 10 s
+  state.backend.type: hashmap
+  state.checkpoints.dir: file:///opt/flink/checkpoints
+  execution.checkpointing.interval: 10 s
+  execution.checkpointing.mode: EXACTLY_ONCE
+  execution.checkpointing.timeout: 60 s
+  execution.checkpointing.max-concurrent-checkpoints: 1
+
 services:
   postgres:
     image: postgres:16
@@ -54,9 +66,10 @@ services:
       "
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      FLINK_PROPERTIES: *flink-properties
     volumes:
       - ./flink/jobs:/opt/flink/jobs
-      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_checkpoints_v2:/opt/flink/checkpoints
     networks:
       - cdc-network
 
@@ -70,9 +83,10 @@ services:
     command: taskmanager
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      FLINK_PROPERTIES: *flink-properties
     volumes:
       - ./flink/jobs:/opt/flink/jobs
-      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_checkpoints_v2:/opt/flink/checkpoints
     networks:
       - cdc-network
 
@@ -177,7 +191,7 @@ services:
 volumes:
   pg_data:
   clickhouse_data:
-  flink_checkpoints:
+  flink_checkpoints_v2:
   pg_primary_data:
   pg_replica1_data:
   pg_replica2_data:
