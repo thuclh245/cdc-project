@@ -4,17 +4,12 @@ from datetime import datetime, timezone
 # pyrefly: ignore [missing-import]
 from faker import Faker
 import psycopg2
+from db_config import get_postgres_config, get_postgres_target
 
 fake = Faker()
 
-# PostgreSQL connection — kết nối tới pg-primary (port 5433)
-conn = psycopg2.connect(
-    host="localhost",
-    port=5433,
-    database="cdc_demo",
-    user="postgres",
-    password="postgres"
-)
+print(f"Connecting to PostgreSQL: {get_postgres_target()}")
+conn = psycopg2.connect(**get_postgres_config())
 
 conn.autocommit = True
 cur = conn.cursor()

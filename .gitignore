@@ -1,2 +1,5 @@
 /flink/connectors/flink-connector-*
 /flink/jobs
+.env
+__pycache__/
+*.py[cod]

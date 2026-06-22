@@ -2,14 +2,10 @@ import random
 import time
 from datetime import datetime
 import psycopg2
+from db_config import get_postgres_config, get_postgres_target
 
-conn = psycopg2.connect(
-    host="localhost",
-    port=5432,
-    database="cdc_demo",
-    user="postgres",
-    password="postgres"
-)
+print(f"Connecting to PostgreSQL: {get_postgres_target()}")
+conn = psycopg2.connect(**get_postgres_config())
 
 cur = conn.cursor()
 
