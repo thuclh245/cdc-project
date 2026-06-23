@@ -32,6 +32,7 @@
 CREATE DATABASE IF NOT EXISTS ecommerce_ods;
 
 DROP TABLE IF EXISTS ecommerce_ods.customers_sink;
+DROP TABLE IF EXISTS ecommerce_ods.categories_sink;
 DROP TABLE IF EXISTS ecommerce_ods.products_sink;
 DROP TABLE IF EXISTS ecommerce_ods.orders_sink;
 DROP TABLE IF EXISTS ecommerce_ods.order_items_sink;
@@ -55,6 +56,19 @@ CREATE TABLE ecommerce_ods.customers_sink
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY customer_id;
+
+CREATE TABLE ecommerce_ods.categories_sink
+(
+    category_id Int64,
+    category_name String,
+    description Nullable(String),
+    category_status String,
+    created_at DateTime64(3),
+    updated_at DateTime64(3),
+    deleted_at Nullable(DateTime64(3))
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY category_id;
 
 CREATE TABLE ecommerce_ods.products_sink
 (

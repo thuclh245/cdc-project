@@ -1,63 +1,10 @@
--- SET 'execution.runtime-mode' = 'streaming';
--- SET 'pipeline.name' = 'postgres-to-clickhouse-cdc';
-
--- CREATE TABLE postgres_orders (
---     order_id BIGINT,
---     customer_id BIGINT,
---     status STRING,
---     amount DECIMAL(12, 2),
---     created_at TIMESTAMP(3),
---     updated_at TIMESTAMP(3),
---     deleted BOOLEAN,
---     PRIMARY KEY (order_id) NOT ENFORCED
--- ) WITH (
---     'connector' = 'postgres-cdc',
---     'hostname' = 'pg-primary',
---     'port' = '5432',
---     'username' = 'postgres',
---     'password' = 'postgres',
---     'database-name' = 'ecommerce_ods',
---     'schema-name' = 'public',
---     'table-name' = 'orders',
---     'slot.name' = 'flink_orders_slot_ha',
---     'decoding.plugin.name' = 'pgoutput'
--- );
-
--- CREATE TABLE clickhouse_orders (
---     order_id BIGINT,
---     customer_id BIGINT,
---     status STRING,
---     amount DECIMAL(12, 2),
---     created_at TIMESTAMP(3),
---     updated_at TIMESTAMP(3),
---     deleted INT,
---     PRIMARY KEY (order_id) NOT ENFORCED
--- ) WITH (
---     'connector' = 'clickhouse',
---     'url' = 'clickhouse://clickhouse:8123',
---     'database-name' = 'ecommerce_ods',
---     'table-name' = 'orders_sink',
---     'username' = 'default',
---     'password' = '',
---     'sink.update-strategy' = 'insert'
--- );
-
-
--- INSERT INTO clickhouse_orders
--- SELECT
---     order_id,
---     customer_id,
---     status,
---     amount,
---     created_at,
---     updated_at,
---     CAST(deleted AS INT) AS deleted
--- FROM postgres_orders;
-
-
-
 SET 'execution.runtime-mode' = 'streaming';
-SET 'pipeline.name' = 'postgres-to-clickhouse-ecommerce-cdc';
+SET 'pipeline.name' = 'ecommerce-postgres-to-clickhouse-cdc';
+
+SET 'execution.checkpointing.interval' = '10 s';
+SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
+SET 'execution.checkpointing.timeout' = '60 s';
+SET 'execution.checkpointing.max-concurrent-checkpoints' = '1';
 
 CREATE TABLE postgres_customers (
     customer_id BIGINT,
@@ -84,6 +31,28 @@ CREATE TABLE postgres_customers (
     'schema-name' = 'public',
     'table-name' = 'customers',
     'slot.name' = 'flink_customers_slot',
+    'decoding.plugin.name' = 'pgoutput'
+);
+
+CREATE TABLE postgres_categories (
+    category_id BIGINT,
+    category_name STRING,
+    description STRING,
+    category_status STRING,
+    created_at TIMESTAMP(3),
+    updated_at TIMESTAMP(3),
+    deleted_at TIMESTAMP(3),
+    PRIMARY KEY (category_id) NOT ENFORCED
+) WITH (
+    'connector' = 'postgres-cdc',
+    'hostname' = 'pg-primary',
+    'port' = '5432',
+    'username' = 'postgres',
+    'password' = 'postgres',
+    'database-name' = 'ecommerce_ods',
+    'schema-name' = 'public',
+    'table-name' = 'categories',
+    'slot.name' = 'flink_categories_slot',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -219,6 +188,25 @@ CREATE TABLE clickhouse_customers (
     'sink.update-strategy' = 'insert'
 );
 
+CREATE TABLE clickhouse_categories (
+    category_id BIGINT,
+    category_name STRING,
+    description STRING,
+    category_status STRING,
+    created_at TIMESTAMP(3),
+    updated_at TIMESTAMP(3),
+    deleted_at TIMESTAMP(3),
+    PRIMARY KEY (category_id) NOT ENFORCED
+) WITH (
+    'connector' = 'clickhouse',
+    'url' = 'clickhouse://clickhouse:8123',
+    'database-name' = 'ecommerce_ods',
+    'table-name' = 'categories_sink',
+    'username' = 'default',
+    'password' = '',
+    'sink.update-strategy' = 'insert'
+);
+
 CREATE TABLE clickhouse_products (
     product_id BIGINT,
     product_name STRING,
@@ -319,6 +307,9 @@ BEGIN
 
 INSERT INTO clickhouse_customers
 SELECT * FROM postgres_customers;
+
+INSERT INTO clickhouse_categories
+SELECT * FROM postgres_categories;
 
 INSERT INTO clickhouse_products
 SELECT * FROM postgres_products;

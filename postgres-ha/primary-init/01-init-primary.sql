@@ -4,6 +4,7 @@ DROP TABLE IF EXISTS order_items CASCADE;
 DROP TABLE IF EXISTS payments CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
+DROP TABLE IF EXISTS categories CASCADE;
 DROP TABLE IF EXISTS customers CASCADE;
 
 CREATE TABLE customers (
@@ -22,6 +23,16 @@ CREATE TABLE customers (
     deleted_at TIMESTAMP NULL
 );
 
+CREATE TABLE categories (
+    category_id BIGSERIAL PRIMARY KEY,
+    category_name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    category_status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
+);
+
 CREATE TABLE products (
     product_id BIGSERIAL PRIMARY KEY,
     product_name VARCHAR(255) NOT NULL,
@@ -35,6 +46,9 @@ CREATE TABLE products (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL
 );
+
+ALTER TABLE products
+ADD COLUMN category_id BIGINT REFERENCES categories(category_id);
 
 CREATE TABLE orders (
     order_id BIGSERIAL PRIMARY KEY,
@@ -81,6 +95,8 @@ CREATE TABLE payments (
 );
 
 CREATE INDEX idx_customers_updated_at ON customers(updated_at);
+CREATE INDEX idx_categories_updated_at ON categories(updated_at);
+CREATE INDEX idx_categories_deleted_at ON categories(deleted_at);
 CREATE INDEX idx_products_updated_at ON products(updated_at);
 CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 CREATE INDEX idx_orders_updated_at ON orders(updated_at);
@@ -100,6 +116,11 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_customers_updated_at
 BEFORE UPDATE ON customers
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_categories_updated_at
+BEFORE UPDATE ON categories
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
@@ -124,6 +145,7 @@ FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE customers REPLICA IDENTITY FULL;
+ALTER TABLE categories REPLICA IDENTITY FULL;
 ALTER TABLE products REPLICA IDENTITY FULL;
 ALTER TABLE orders REPLICA IDENTITY FULL;
 ALTER TABLE order_items REPLICA IDENTITY FULL;
@@ -133,6 +155,7 @@ DROP PUBLICATION IF EXISTS ecommerce_pub;
 
 CREATE PUBLICATION ecommerce_pub FOR TABLE
     customers,
+    categories,
     products,
     orders,
     order_items,
