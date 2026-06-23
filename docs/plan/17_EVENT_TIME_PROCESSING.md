@@ -94,7 +94,7 @@ CREATE TABLE orders_source (
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
-    'database-name' = 'cdc_demo',
+    'database-name' = 'ecommerce_ods',
     'schema-name' = 'public',
     'table-name' = 'orders',
     'slot.name' = 'flink_orders_slot_event_time'

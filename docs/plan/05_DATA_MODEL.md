@@ -61,9 +61,9 @@ Lý do:
 ## ClickHouse sink table
 
 ```sql
-CREATE DATABASE IF NOT EXISTS cdc_demo;
+CREATE DATABASE IF NOT EXISTS ecommerce_ods;
 
-CREATE TABLE IF NOT EXISTS cdc_demo.orders_sink
+CREATE TABLE IF NOT EXISTS ecommerce_ods.orders_sink
 (
     order_id UInt64,
     customer_id UInt64,
@@ -91,6 +91,6 @@ Query kiểm tra trạng thái mới nhất:
 
 ```sql
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE order_id = 1001;
 ```

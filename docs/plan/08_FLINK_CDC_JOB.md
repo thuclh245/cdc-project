@@ -30,7 +30,7 @@ CREATE TABLE postgres_orders (
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
-    'database-name' = 'cdc_demo',
+    'database-name' = 'ecommerce_ods',
     'schema-name' = 'public',
     'table-name' = 'orders',
     'slot.name' = 'flink_orders_slot',
@@ -52,7 +52,7 @@ CREATE TABLE clickhouse_orders (
     PRIMARY KEY (order_id) NOT ENFORCED
 ) WITH (
     'connector' = 'jdbc',
-    'url' = 'jdbc:clickhouse://clickhouse-sink:8123/cdc_demo',
+    'url' = 'jdbc:clickhouse://clickhouse-sink:8123/ecommerce_ods',
     'table-name' = 'orders_sink',
     'driver' = 'com.clickhouse.jdbc.ClickHouseDriver'
 );

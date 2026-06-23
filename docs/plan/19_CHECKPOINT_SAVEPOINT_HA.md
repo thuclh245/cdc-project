@@ -112,7 +112,7 @@ VALUES (800001, 101, 'CREATED', 100000, FALSE);
 ### Bước 3: Kiểm tra ClickHouse
 
 ```sql
-SELECT * FROM cdc_demo.orders_sink FINAL WHERE order_id = 800001;
+SELECT * FROM ecommerce_ods.orders_sink FINAL WHERE order_id = 800001;
 ```
 
 ### Bước 4: Restart TaskManager
@@ -132,7 +132,7 @@ VALUES (800002, 102, 'CREATED', 200000, FALSE);
 
 ```sql
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE order_id IN (800001, 800002);
 ```
 

@@ -16,7 +16,7 @@ docker compose down -v
 ## PostgreSQL primary
 
 ```powershell
-docker exec -it pg-primary psql -U postgres -d cdc_demo
+docker exec -it pg-primary psql -U postgres -d ecommerce_ods
 ```
 
 ```sql
@@ -30,8 +30,8 @@ SELECT slot_name, plugin, slot_type, active FROM pg_replication_slots;
 ## PostgreSQL replica
 
 ```powershell
-docker exec -it pg-replica-1 psql -U postgres -d cdc_demo
-docker exec -it pg-replica-2 psql -U postgres -d cdc_demo
+docker exec -it pg-replica-1 psql -U postgres -d ecommerce_ods
+docker exec -it pg-replica-2 psql -U postgres -d ecommerce_ods
 ```
 
 ```sql
@@ -47,7 +47,7 @@ vào `pg-primary` qua host port `5433`:
 ```bash
 export POSTGRES_HOST=localhost
 export POSTGRES_PORT=5433
-export POSTGRES_DB=cdc_demo
+export POSTGRES_DB=ecommerce_ods
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 ```
@@ -95,7 +95,7 @@ docker exec -it clickhouse-sink clickhouse-client
 
 ```sql
 SHOW DATABASES;
-SHOW TABLES FROM cdc_demo;
-SELECT * FROM cdc_demo.orders_sink FINAL WHERE order_id = 950001;
-SELECT status, count(*) FROM cdc_demo.orders_sink FINAL WHERE deleted = 0 GROUP BY status;
+SHOW TABLES FROM ecommerce_ods;
+SELECT * FROM ecommerce_ods.orders_sink FINAL WHERE order_id = 950001;
+SELECT status, count(*) FROM ecommerce_ods.orders_sink FINAL WHERE deleted = 0 GROUP BY status;
 ```

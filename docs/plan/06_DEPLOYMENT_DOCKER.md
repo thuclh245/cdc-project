@@ -8,7 +8,6 @@
 
 | Service | Container | Port host | Vai trò |
 |---|---|---:|---|
-| `postgres` | `pg-source` | 5432 | PostgreSQL source đơn lẻ ban đầu |
 | `pg-primary` | `pg-primary` | 5433 | Primary HA |
 | `pg-replica-1` | `pg-replica-1` | 5434 | Replica 1 |
 | `pg-replica-2` | `pg-replica-2` | 5435 | Replica 2 |
@@ -47,7 +46,6 @@ Lý do cần Dockerfile riêng: Flink image gốc chỉ là engine, chưa có co
 
 | Volume | Vai trò |
 |---|---|
-| `pg_data` | Dữ liệu `pg-source` |
 | `pg_primary_data` | Dữ liệu primary |
 | `pg_replica1_data` | Dữ liệu replica 1 |
 | `pg_replica2_data` | Dữ liệu replica 2 |

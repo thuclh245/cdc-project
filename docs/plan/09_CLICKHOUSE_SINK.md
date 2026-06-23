@@ -11,9 +11,9 @@ ClickHouse là OLAP sink, nhận dữ liệu từ Flink CDC và phục vụ truy
 ## Bảng sink
 
 ```sql
-CREATE DATABASE IF NOT EXISTS cdc_demo;
+CREATE DATABASE IF NOT EXISTS ecommerce_ods;
 
-CREATE TABLE IF NOT EXISTS cdc_demo.orders_sink
+CREATE TABLE IF NOT EXISTS ecommerce_ods.orders_sink
 (
     order_id UInt64,
     customer_id UInt64,
@@ -38,7 +38,7 @@ ORDER BY order_id;
 
 ```sql
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE order_id = 1001;
 ```
 
@@ -48,7 +48,7 @@ Số đơn theo trạng thái:
 
 ```sql
 SELECT status, count(*) AS total
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0
 GROUP BY status
 ORDER BY total DESC;
@@ -58,7 +58,7 @@ Tổng doanh thu:
 
 ```sql
 SELECT sum(amount) AS total_revenue
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0
   AND status IN ('PAID', 'SHIPPED', 'COMPLETED');
 ```
@@ -67,7 +67,7 @@ Doanh thu theo phút:
 
 ```sql
 SELECT toStartOfMinute(updated_at) AS minute, sum(amount) AS revenue
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0
 GROUP BY minute
 ORDER BY minute;
@@ -77,7 +77,7 @@ Tỷ lệ hủy:
 
 ```sql
 SELECT countIf(status = 'CANCELLED' OR deleted = 1) / count() AS cancel_rate
-FROM cdc_demo.orders_sink FINAL;
+FROM ecommerce_ods.orders_sink FINAL;
 ```
 
 ## Lưu ý

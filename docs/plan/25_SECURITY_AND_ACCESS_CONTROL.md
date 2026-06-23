@@ -45,7 +45,7 @@ CDC user:
 
 ```sql
 CREATE USER flink_cdc WITH REPLICATION LOGIN PASSWORD 'change_me';
-GRANT CONNECT ON DATABASE cdc_demo TO flink_cdc;
+GRANT CONNECT ON DATABASE ecommerce_ods TO flink_cdc;
 GRANT USAGE ON SCHEMA public TO flink_cdc;
 GRANT SELECT ON orders TO flink_cdc;
 ```
@@ -54,7 +54,7 @@ Application user:
 
 ```sql
 CREATE USER app_user WITH PASSWORD 'change_me';
-GRANT CONNECT ON DATABASE cdc_demo TO app_user;
+GRANT CONNECT ON DATABASE ecommerce_ods TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON orders TO app_user;
 ```
 
@@ -62,7 +62,7 @@ Readonly user:
 
 ```sql
 CREATE USER readonly_user WITH PASSWORD 'change_me';
-GRANT CONNECT ON DATABASE cdc_demo TO readonly_user;
+GRANT CONNECT ON DATABASE ecommerce_ods TO readonly_user;
 GRANT USAGE ON SCHEMA public TO readonly_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_user;
 ```

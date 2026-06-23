@@ -53,7 +53,7 @@ ADD COLUMN discount_amount NUMERIC(12,2) DEFAULT 0;
 ### Bước 3: Migration ClickHouse
 
 ```sql
-ALTER TABLE cdc_demo.orders_sink
+ALTER TABLE ecommerce_ods.orders_sink
 ADD COLUMN discount_amount Decimal(12,2) DEFAULT 0;
 ```
 
@@ -75,7 +75,7 @@ Submit lại job với schema mới.
 
 ```sql
 SELECT discount_amount
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 ORDER BY updated_at DESC
 LIMIT 10;
 ```

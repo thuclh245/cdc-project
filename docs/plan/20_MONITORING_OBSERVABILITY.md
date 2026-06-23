@@ -93,10 +93,10 @@ Flink UI cần chụp:
 ## 5. ClickHouse monitoring
 
 ```sql
-SELECT count() FROM cdc_demo.orders_sink FINAL;
+SELECT count() FROM ecommerce_ods.orders_sink FINAL;
 
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 ORDER BY updated_at DESC
 LIMIT 10;
 ```
@@ -105,7 +105,7 @@ Duplicate vật lý:
 
 ```sql
 SELECT order_id, count()
-FROM cdc_demo.orders_sink
+FROM ecommerce_ods.orders_sink
 GROUP BY order_id
 HAVING count() > 1
 ORDER BY count() DESC

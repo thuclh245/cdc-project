@@ -32,7 +32,7 @@ ClickHouse:
 ```sql
 SELECT COUNT(*) AS total_orders,
        COALESCE(SUM(amount), 0) AS total_amount
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0;
 ```
 
@@ -52,7 +52,7 @@ ClickHouse:
 
 ```sql
 SELECT status, COUNT(*)
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0
 GROUP BY status
 ORDER BY status;
@@ -69,14 +69,14 @@ SELECT COUNT(*) FROM orders WHERE deleted = TRUE;
 ClickHouse:
 
 ```sql
-SELECT COUNT(*) FROM cdc_demo.orders_sink FINAL WHERE deleted = 1;
+SELECT COUNT(*) FROM ecommerce_ods.orders_sink FINAL WHERE deleted = 1;
 ```
 
 ## 6. Duplicate latest state
 
 ```sql
 SELECT order_id, COUNT(*)
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 GROUP BY order_id
 HAVING COUNT(*) > 1;
 ```

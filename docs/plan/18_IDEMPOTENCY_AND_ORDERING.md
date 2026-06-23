@@ -32,7 +32,7 @@ Nếu sink append-only, duplicate có thể làm sai `COUNT` và `SUM`.
 ClickHouse table:
 
 ```sql
-CREATE TABLE cdc_demo.orders_sink (
+CREATE TABLE ecommerce_ods.orders_sink (
     order_id Int64,
     customer_id Int64,
     status String,
@@ -49,7 +49,7 @@ Query latest state:
 
 ```sql
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0;
 ```
 
@@ -154,7 +154,7 @@ WHERE order_id=700001;
 
 ```sql
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE order_id = 700001;
 ```
 
@@ -174,7 +174,7 @@ ClickHouse:
 
 ```sql
 SELECT COUNT(*), SUM(amount)
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE deleted = 0;
 ```
 

@@ -35,7 +35,7 @@ flowchart TB
             TM["flink-taskmanager"]
             JM <--> TM
         end
-        CH["clickhouse-sink<br/>ClickHouse<br/>8123/9000<br/>cdc_demo.orders_sink"]
+        CH["clickhouse-sink<br/>ClickHouse<br/>8123/9000<br/>ecommerce_ods.orders_sink"]
         P -->|logical WAL / pgoutput<br/>INSERT, UPDATE, DELETE| JM
         JM -->|CDC change events| CH
     end

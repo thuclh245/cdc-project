@@ -19,7 +19,6 @@ docker ps
 Kỳ vọng có các container:
 
 ```text
-pg-source
 pg-primary
 pg-replica-1
 pg-replica-2
@@ -46,7 +45,7 @@ Cảnh báo: `down -v` sẽ xóa dữ liệu PostgreSQL, ClickHouse và checkpoi
 ## 4. Kiểm tra PostgreSQL primary
 
 ```powershell
-docker exec -it pg-primary psql -U postgres -d cdc_demo
+docker exec -it pg-primary psql -U postgres -d ecommerce_ods
 ```
 
 ```sql
@@ -68,7 +67,7 @@ publication tồn tại
 Replica 1:
 
 ```powershell
-docker exec -it pg-replica-1 psql -U postgres -d cdc_demo
+docker exec -it pg-replica-1 psql -U postgres -d ecommerce_ods
 ```
 
 ```sql
@@ -79,7 +78,7 @@ SELECT COUNT(*) FROM orders;
 Replica 2:
 
 ```powershell
-docker exec -it pg-replica-2 psql -U postgres -d cdc_demo
+docker exec -it pg-replica-2 psql -U postgres -d ecommerce_ods
 ```
 
 ```sql
@@ -124,10 +123,10 @@ docker exec -it clickhouse-sink clickhouse-client
 ```
 
 ```sql
-SELECT count() FROM cdc_demo.orders_sink FINAL;
+SELECT count() FROM ecommerce_ods.orders_sink FINAL;
 
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 ORDER BY updated_at DESC
 LIMIT 10;
 ```
@@ -163,7 +162,7 @@ WHERE order_id = 990001;
 
 ```sql
 SELECT *
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 WHERE order_id = 990001;
 ```
 
@@ -189,7 +188,7 @@ VALUES (990002, 1002, 'CREATED', 200000, FALSE);
 Kiểm tra ClickHouse:
 
 ```sql
-SELECT * FROM cdc_demo.orders_sink FINAL WHERE order_id = 990002;
+SELECT * FROM ecommerce_ods.orders_sink FINAL WHERE order_id = 990002;
 ```
 
 ## 11. Lỗi thường gặp

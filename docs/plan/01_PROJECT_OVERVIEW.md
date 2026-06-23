@@ -18,7 +18,7 @@ Dự án xây dựng pipeline CDC gần thời gian thực để đồng bộ d�
 - Bảng chính: `orders`.
 - PostgreSQL: 1 primary + 2 replica.
 - Flink CDC đọc thay đổi từ PostgreSQL primary.
-- ClickHouse lưu dữ liệu vào `cdc_demo.orders_sink`.
+- ClickHouse lưu dữ liệu vào `ecommerce_ods.orders_sink`.
 - Hỗ trợ thao tác `INSERT`, `UPDATE`, `DELETE` theo hướng soft delete.
 - Đo kiểm: latency, throughput, correctness, fault tolerance.
 

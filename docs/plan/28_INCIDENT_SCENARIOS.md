@@ -108,7 +108,7 @@ Xử lý:
 Dấu hiệu:
 
 ```sql
-SELECT count() FROM cdc_demo.orders_sink FINAL;
+SELECT count() FROM ecommerce_ods.orders_sink FINAL;
 ```
 
 Không tăng sau khi insert PostgreSQL.
@@ -127,7 +127,7 @@ Kiểm tra vật lý:
 
 ```sql
 SELECT order_id, COUNT(*)
-FROM cdc_demo.orders_sink
+FROM ecommerce_ods.orders_sink
 GROUP BY order_id
 HAVING COUNT(*) > 1;
 ```
@@ -136,7 +136,7 @@ Kiểm tra logic:
 
 ```sql
 SELECT order_id, COUNT(*)
-FROM cdc_demo.orders_sink FINAL
+FROM ecommerce_ods.orders_sink FINAL
 GROUP BY order_id
 HAVING COUNT(*) > 1;
 ```

@@ -1,7 +1,7 @@
 ## PostgreSQL setup
 
 - PostgreSQL version: 16
-- Database: cdc_demo
+- Database: ecommerce_ods
 - wal_level: logical
 - max_replication_slots: 10
 - max_wal_senders: 10
@@ -12,7 +12,7 @@
 ## ClickHouse setup
 
 - ClickHouse container: clickhouse-sink
-- Database: cdc_demo
+- Database: ecommerce_ods
 - Table: orders_sink
 - Engine: ReplacingMergeTree(updated_at)
 - Query test: success

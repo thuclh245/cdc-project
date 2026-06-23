@@ -11,29 +11,6 @@ x-flink-properties: &flink-properties |
   execution.checkpointing.max-concurrent-checkpoints: 1
 
 services:
-  postgres:
-    image: postgres:16
-    container_name: pg-source
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: cdc_demo
-    ports:
-      - "5432:5432"
-    command:
-      - "postgres"
-      - "-c"
-      - "wal_level=logical"
-      - "-c"
-      - "max_replication_slots=10"
-      - "-c"
-      - "max_wal_senders=10"
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - cdc-network
-
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse-sink
@@ -41,7 +18,7 @@ services:
       - "8123:8123"
       - "9000:9000"
     environment:
-      - CLICKHOUSE_DB=cdc_demo
+      - CLICKHOUSE_DB=ecommerce_ods
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
       - CLICKHOUSE_SKIP_USER_SETUP=1
     volumes:
@@ -96,7 +73,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: cdc_demo
+      POSTGRES_DB: ecommerce_ods
     command:
       - "postgres"
       - "-c"
@@ -189,7 +166,6 @@ services:
       - cdc-network
 
 volumes:
-  pg_data:
   clickhouse_data:
   flink_checkpoints_v2:
   pg_primary_data:

@@ -38,7 +38,7 @@ pg_basebackup -h pg-primary -p 5432 -U replicator   -D /var/lib/postgresql/data 
 ## Kiểm tra primary
 
 ```powershell
-docker exec -it pg-primary psql -U postgres -d cdc_demo
+docker exec -it pg-primary psql -U postgres -d ecommerce_ods
 ```
 
 ```sql
@@ -50,7 +50,7 @@ SELECT * FROM pg_publication;
 ## Kiểm tra replica
 
 ```powershell
-docker exec -it pg-replica-1 psql -U postgres -d cdc_demo
+docker exec -it pg-replica-1 psql -U postgres -d ecommerce_ods
 ```
 
 ```sql

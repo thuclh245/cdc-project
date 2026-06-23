@@ -14,11 +14,11 @@ This log captures the correctness check between PostgreSQL and ClickHouse, as we
 
 ### ClickHouse Queries
 - Total rows count:
-  `SELECT COUNT(*) FROM cdc_demo.orders_sink;`
+  `SELECT COUNT(*) FROM ecommerce_ods.orders_sink;`
 - Counts by status:
-  `SELECT status, COUNT(*) FROM cdc_demo.orders_sink GROUP BY status ORDER BY status;`
+  `SELECT status, COUNT(*) FROM ecommerce_ods.orders_sink GROUP BY status ORDER BY status;`
 - Sum of amounts:
-  `SELECT SUM(amount) FROM cdc_demo.orders_sink;`
+  `SELECT SUM(amount) FROM ecommerce_ods.orders_sink;`
 
 ---
 

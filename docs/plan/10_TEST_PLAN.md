@@ -34,7 +34,7 @@ VALUES (920001, 300, 'CREATED', 150000);
 ClickHouse:
 
 ```sql
-SELECT * FROM cdc_demo.orders_sink FINAL WHERE order_id = 920001;
+SELECT * FROM ecommerce_ods.orders_sink FINAL WHERE order_id = 920001;
 ```
 
 ## Test UPDATE
@@ -69,8 +69,8 @@ SELECT SUM(amount) FROM orders WHERE deleted = FALSE AND status IN ('PAID','SHIP
 ClickHouse:
 
 ```sql
-SELECT COUNT(*) FROM cdc_demo.orders_sink FINAL WHERE deleted = 0;
-SELECT SUM(amount) FROM cdc_demo.orders_sink FINAL WHERE deleted = 0 AND status IN ('PAID','SHIPPED','COMPLETED');
+SELECT COUNT(*) FROM ecommerce_ods.orders_sink FINAL WHERE deleted = 0;
+SELECT SUM(amount) FROM ecommerce_ods.orders_sink FINAL WHERE deleted = 0 AND status IN ('PAID','SHIPPED','COMPLETED');
 ```
 
 ## Latency
