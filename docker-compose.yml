@@ -1,8 +1,10 @@
 x-flink-properties: &flink-properties |
   jobmanager.rpc.address: flink-jobmanager
-  restart-strategy.type: fixed-delay
-  restart-strategy.fixed-delay.attempts: 3
-  restart-strategy.fixed-delay.delay: 10 s
+  jobmanager.execution.failover-strategy: full
+  restart-strategy.type: failure-rate
+  restart-strategy.failure-rate.max-failures-per-interval: 3
+  restart-strategy.failure-rate.failure-rate-interval: 5 min
+  restart-strategy.failure-rate.delay: 10 s
   state.backend.type: hashmap
   state.checkpoints.dir: file:///opt/flink/checkpoints
   execution.checkpointing.interval: 10 s
