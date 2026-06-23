@@ -2,7 +2,6 @@ import random
 from decimal import Decimal
 from faker import Faker
 
-from scripts.common.constants import ORDER_STATUSES
 from scripts.common.utils import (
     random_discount,
     random_shipping_fee,
@@ -13,7 +12,10 @@ from scripts.services.product_service import (
     get_random_product,
     get_product_by_id,
     insert_product,
-    decrease_stock,
+)
+from scripts.services.inventory_service import (
+    decrease_stock_for_sale,
+    restore_stock_for_cancelled_order,
 )
 from scripts.services.payment_service import (
     insert_payment,
@@ -22,6 +24,11 @@ from scripts.services.payment_service import (
 
 
 fake = Faker("vi_VN")
+
+ORDER_TRANSITIONS = {
+    "PENDING": ["CONFIRMED", "CANCELLED"],
+    "CONFIRMED": ["SHIPPING", "CANCELLED"],
+}
 
 
 def insert_order(conn, payment_probability=0.8):
@@ -128,7 +135,12 @@ def insert_order(conn, payment_probability=0.8):
                 ),
             )
 
-            decrease_stock(conn, item["product_id"], item["quantity"])
+            decrease_stock_for_sale(
+                conn,
+                item["product_id"],
+                item["quantity"],
+                order_id,
+            )
 
         if random.random() < payment_probability:
             payment_id, payment_status = insert_payment(conn, order_id, final_amount)
@@ -146,9 +158,10 @@ def update_random_order(conn):
             SELECT order_id, order_status
             FROM orders
             WHERE deleted_at IS NULL
-              AND order_status != 'CANCELLED'
+              AND order_status IN ('PENDING', 'CONFIRMED')
             ORDER BY random()
             LIMIT 1
+            FOR UPDATE SKIP LOCKED
             """
         )
 
@@ -158,7 +171,19 @@ def update_random_order(conn):
             return None
 
         order_id, old_status = row
-        new_status = random.choice(ORDER_STATUSES)
+        new_status = random.choice(ORDER_TRANSITIONS[old_status])
+
+        if new_status == "CANCELLED":
+            restore_stock_for_cancelled_order(conn, order_id)
+            cur.execute(
+                """
+                UPDATE shipments
+                SET deleted_at = CURRENT_TIMESTAMP
+                WHERE order_id = %s
+                  AND deleted_at IS NULL
+                """,
+                (order_id,),
+            )
 
         cur.execute(
             """
@@ -181,8 +206,10 @@ def soft_delete_random_order(conn):
             SELECT order_id
             FROM orders
             WHERE deleted_at IS NULL
+              AND order_status IN ('PENDING', 'CONFIRMED')
             ORDER BY random()
             LIMIT 1
+            FOR UPDATE SKIP LOCKED
             """
         )
 
@@ -192,6 +219,8 @@ def soft_delete_random_order(conn):
             return None
 
         order_id = row[0]
+
+        restore_stock_for_cancelled_order(conn, order_id)
 
         cur.execute(
             """

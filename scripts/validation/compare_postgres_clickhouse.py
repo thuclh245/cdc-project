@@ -84,6 +84,12 @@ CHECKS = (
         parse_int,
     ),
     Check(
+        "inventory_movements count",
+        "SELECT COUNT(*) FROM inventory_movements",
+        "SELECT count() FROM ecommerce_ods.inventory_movements_sink FINAL",
+        parse_int,
+    ),
+    Check(
         "deleted_orders",
         "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL",
         "SELECT count() FROM ecommerce_ods.orders_sink FINAL "

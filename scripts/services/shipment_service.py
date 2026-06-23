@@ -111,7 +111,18 @@ def advance_random_shipment(conn):
             (new_status, new_status, new_status, shipment_id),
         )
 
-        if new_status == "DELIVERED":
+        if new_status in {"PICKED_UP", "IN_TRANSIT"}:
+            cur.execute(
+                """
+                UPDATE orders
+                SET order_status = 'SHIPPING'
+                WHERE order_id = %s
+                  AND deleted_at IS NULL
+                  AND order_status != 'CANCELLED'
+                """,
+                (order_id,),
+            )
+        elif new_status == "DELIVERED":
             cur.execute(
                 """
                 UPDATE orders

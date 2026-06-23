@@ -4,6 +4,7 @@ from faker import Faker
 
 from scripts.common.constants import CATEGORIES, BRANDS
 from scripts.common.utils import random_money, log_event
+from scripts.services.inventory_service import record_inventory_movement
 
 
 fake = Faker("vi_VN")
@@ -12,6 +13,7 @@ fake = Faker("vi_VN")
 def insert_product(conn):
     price = random_money()
     cost = (price * Decimal(str(random.uniform(0.5, 0.8)))).quantize(Decimal("0.01"))
+    initial_stock = random.randint(20, 1000)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -34,13 +36,23 @@ def insert_product(conn):
                 random.choice(BRANDS),
                 price,
                 cost,
-                random.randint(20, 1000),
+                initial_stock,
                 "ACTIVE",
             ),
         )
 
         product_id = cur.fetchone()[0]
 
+    record_inventory_movement(
+        conn,
+        product_id=product_id,
+        order_id=None,
+        movement_type="IMPORT",
+        quantity_change=initial_stock,
+        old_stock=0,
+        new_stock=initial_stock,
+        reason="Initial stock for new product",
+    )
     conn.commit()
     log_event("INSERT PRODUCT", f"product_id={product_id}")
     return product_id
@@ -81,22 +93,6 @@ def get_product_by_id(conn, product_id):
     return row
 
 
-def decrease_stock(conn, product_id, quantity):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE products
-            SET stock_quantity = GREATEST(stock_quantity - %s, 0),
-                product_status = CASE
-                    WHEN GREATEST(stock_quantity - %s, 0) = 0 THEN 'OUT_OF_STOCK'
-                    ELSE 'ACTIVE'
-                END
-            WHERE product_id = %s
-            """,
-            (quantity, quantity, product_id),
-        )
-
-
 def update_random_product(conn):
     with conn.cursor() as cur:
         cur.execute(
@@ -106,6 +102,7 @@ def update_random_product(conn):
             WHERE deleted_at IS NULL
             ORDER BY random()
             LIMIT 1
+            FOR UPDATE SKIP LOCKED
             """
         )
 
@@ -144,6 +141,19 @@ def update_random_product(conn):
                 """,
                 (new_stock, product_status, product_id),
             )
+
+            quantity_change = new_stock - old_stock
+            if quantity_change != 0:
+                record_inventory_movement(
+                    conn,
+                    product_id=product_id,
+                    order_id=None,
+                    movement_type="ADJUSTMENT",
+                    quantity_change=quantity_change,
+                    old_stock=old_stock,
+                    new_stock=new_stock,
+                    reason="Stock corrected by product stream",
+                )
 
             message = f"product_id={product_id}, stock={old_stock}->{new_stock}"
 

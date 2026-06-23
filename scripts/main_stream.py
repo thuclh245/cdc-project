@@ -7,6 +7,7 @@ from scripts.streams.product_stream import run_product_stream
 from scripts.streams.order_stream import run_order_stream
 from scripts.streams.payment_stream import run_payment_stream
 from scripts.streams.shipment_stream import run_shipment_stream
+from scripts.streams.inventory_stream import run_inventory_stream
 
 
 def start_thread(name, target):
@@ -31,6 +32,7 @@ def main():
         start_thread("order-stream", run_order_stream),
         start_thread("payment-stream", run_payment_stream),
         start_thread("shipment-stream", run_shipment_stream),
+        start_thread("inventory-stream", run_inventory_stream),
     ]
 
     try:

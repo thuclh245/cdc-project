@@ -1,5 +1,6 @@
 CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'repl_password';
 
+DROP TABLE IF EXISTS inventory_movements CASCADE;
 DROP TABLE IF EXISTS shipments CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
 DROP TABLE IF EXISTS payments CASCADE;
@@ -111,6 +112,20 @@ CREATE TABLE shipments (
     deleted_at TIMESTAMP NULL
 );
 
+CREATE TABLE inventory_movements (
+    movement_id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES products(product_id),
+    order_id BIGINT NULL REFERENCES orders(order_id),
+    movement_type VARCHAR(30) NOT NULL,
+    quantity_change INT NOT NULL,
+    old_stock INT,
+    new_stock INT,
+    reason TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
+);
+
 CREATE INDEX idx_customers_updated_at ON customers(updated_at);
 CREATE INDEX idx_categories_updated_at ON categories(updated_at);
 CREATE INDEX idx_categories_deleted_at ON categories(deleted_at);
@@ -125,6 +140,10 @@ CREATE INDEX idx_payments_updated_at ON payments(updated_at);
 CREATE INDEX idx_shipments_order_id ON shipments(order_id);
 CREATE INDEX idx_shipments_status ON shipments(shipment_status);
 CREATE INDEX idx_shipments_updated_at ON shipments(updated_at);
+CREATE INDEX idx_inventory_product_id ON inventory_movements(product_id);
+CREATE INDEX idx_inventory_order_id ON inventory_movements(order_id);
+CREATE INDEX idx_inventory_type ON inventory_movements(movement_type);
+CREATE INDEX idx_inventory_updated_at ON inventory_movements(updated_at);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -169,6 +188,11 @@ BEFORE UPDATE ON shipments
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER trg_inventory_movements_updated_at
+BEFORE UPDATE ON inventory_movements
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 ALTER TABLE customers REPLICA IDENTITY FULL;
 ALTER TABLE categories REPLICA IDENTITY FULL;
 ALTER TABLE products REPLICA IDENTITY FULL;
@@ -176,6 +200,7 @@ ALTER TABLE orders REPLICA IDENTITY FULL;
 ALTER TABLE order_items REPLICA IDENTITY FULL;
 ALTER TABLE payments REPLICA IDENTITY FULL;
 ALTER TABLE shipments REPLICA IDENTITY FULL;
+ALTER TABLE inventory_movements REPLICA IDENTITY FULL;
 
 DROP PUBLICATION IF EXISTS ecommerce_pub;
 
@@ -186,4 +211,5 @@ CREATE PUBLICATION ecommerce_pub FOR TABLE
     orders,
     order_items,
     payments,
-    shipments;
+    shipments,
+    inventory_movements;

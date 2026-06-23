@@ -190,6 +190,32 @@ CREATE TABLE postgres_shipments (
     'decoding.plugin.name' = 'pgoutput'
 );
 
+CREATE TABLE postgres_inventory_movements (
+    movement_id BIGINT,
+    product_id BIGINT,
+    order_id BIGINT,
+    movement_type STRING,
+    quantity_change INT,
+    old_stock INT,
+    new_stock INT,
+    reason STRING,
+    created_at TIMESTAMP(3),
+    updated_at TIMESTAMP(3),
+    deleted_at TIMESTAMP(3),
+    PRIMARY KEY (movement_id) NOT ENFORCED
+) WITH (
+    'connector' = 'postgres-cdc',
+    'hostname' = 'pg-primary',
+    'port' = '5432',
+    'username' = 'postgres',
+    'password' = 'postgres',
+    'database-name' = 'ecommerce_ods',
+    'schema-name' = 'public',
+    'table-name' = 'inventory_movements',
+    'slot.name' = 'flink_inventory_movements_slot',
+    'decoding.plugin.name' = 'pgoutput'
+);
+
 
 CREATE TABLE clickhouse_customers (
     customer_id BIGINT,
@@ -354,6 +380,29 @@ CREATE TABLE clickhouse_shipments (
     'sink.update-strategy' = 'insert'
 );
 
+CREATE TABLE clickhouse_inventory_movements (
+    movement_id BIGINT,
+    product_id BIGINT,
+    order_id BIGINT,
+    movement_type STRING,
+    quantity_change INT,
+    old_stock INT,
+    new_stock INT,
+    reason STRING,
+    created_at TIMESTAMP(3),
+    updated_at TIMESTAMP(3),
+    deleted_at TIMESTAMP(3),
+    PRIMARY KEY (movement_id) NOT ENFORCED
+) WITH (
+    'connector' = 'clickhouse',
+    'url' = 'clickhouse://clickhouse:8123',
+    'database-name' = 'ecommerce_ods',
+    'table-name' = 'inventory_movements_sink',
+    'username' = 'default',
+    'password' = '',
+    'sink.update-strategy' = 'insert'
+);
+
 
 EXECUTE STATEMENT SET
 BEGIN
@@ -378,5 +427,8 @@ SELECT * FROM postgres_payments;
 
 INSERT INTO clickhouse_shipments
 SELECT * FROM postgres_shipments;
+
+INSERT INTO clickhouse_inventory_movements
+SELECT * FROM postgres_inventory_movements;
 
 END;

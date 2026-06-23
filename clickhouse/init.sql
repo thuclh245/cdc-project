@@ -38,6 +38,7 @@ DROP TABLE IF EXISTS ecommerce_ods.orders_sink;
 DROP TABLE IF EXISTS ecommerce_ods.order_items_sink;
 DROP TABLE IF EXISTS ecommerce_ods.payments_sink;
 DROP TABLE IF EXISTS ecommerce_ods.shipments_sink;
+DROP TABLE IF EXISTS ecommerce_ods.inventory_movements_sink;
 
 CREATE TABLE ecommerce_ods.customers_sink
 (
@@ -159,3 +160,20 @@ CREATE TABLE ecommerce_ods.shipments_sink
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY shipment_id;
+
+CREATE TABLE ecommerce_ods.inventory_movements_sink
+(
+    movement_id Int64,
+    product_id Int64,
+    order_id Nullable(Int64),
+    movement_type String,
+    quantity_change Int32,
+    old_stock Nullable(Int32),
+    new_stock Nullable(Int32),
+    reason Nullable(String),
+    created_at DateTime64(3),
+    updated_at DateTime64(3),
+    deleted_at Nullable(DateTime64(3))
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY movement_id;
