@@ -24,7 +24,7 @@ from scripts.services.payment_service import (
 fake = Faker("vi_VN")
 
 
-def insert_order(conn):
+def insert_order(conn, payment_probability=0.8):
     customer_id = get_random_customer_id(conn)
 
     if customer_id is None:
@@ -130,7 +130,7 @@ def insert_order(conn):
 
             decrease_stock(conn, item["product_id"], item["quantity"])
 
-        if random.random() < 0.8:
+        if random.random() < payment_probability:
             payment_id, payment_status = insert_payment(conn, order_id, final_amount)
             update_order_payment_status(conn, order_id, payment_status)
 

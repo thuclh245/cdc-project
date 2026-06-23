@@ -1,6 +1,7 @@
 import threading
 import time
 
+from scripts.common.constants import STREAM_INTERVAL_SECONDS
 from scripts.streams.customer_stream import run_customer_stream
 from scripts.streams.product_stream import run_product_stream
 from scripts.streams.order_stream import run_order_stream
@@ -34,7 +35,7 @@ def main():
         while True:
             alive_threads = [thread.name for thread in threads if thread.is_alive()]
             print(f"Running streams: {alive_threads}")
-            time.sleep(30)
+            time.sleep(STREAM_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
         print("Stopping streams...")

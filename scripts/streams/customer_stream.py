@@ -1,34 +1,34 @@
-import random
+import time
 
 from scripts.database.connection import get_conn
-from scripts.common.utils import sleep_random
-from scripts.services.customer_service import insert_customer, update_random_customer
+from scripts.common.constants import CUSTOMERS_PER_CYCLE, STREAM_INTERVAL_SECONDS
+from scripts.common.utils import sleep_until_next_cycle
+from scripts.services.customer_service import insert_customer
 
 
 def run_customer_stream():
     conn = get_conn()
 
     try:
-        print("Customer stream started.")
+        print(
+            "Customer stream started: "
+            f"{CUSTOMERS_PER_CYCLE} new customers every {STREAM_INTERVAL_SECONDS}s."
+        )
 
         while True:
-            event_type = random.choices(
-                population=["insert_customer", "update_customer"],
-                weights=[80, 20],
-                k=1,
-            )[0]
+            cycle_started_at = time.monotonic()
+            created = 0
 
-            try:
-                if event_type == "insert_customer":
+            for _ in range(CUSTOMERS_PER_CYCLE):
+                try:
                     insert_customer(conn)
-                else:
-                    update_random_customer(conn)
+                    created += 1
+                except Exception as e:
+                    conn.rollback()
+                    print(f"[ERROR CUSTOMER STREAM] insert_customer: {e}")
 
-            except Exception as e:
-                conn.rollback()
-                print(f"[ERROR CUSTOMER STREAM] {event_type}: {e}")
-
-            sleep_random(2.0, 5.0)
+            print(f"[CUSTOMER CYCLE] created={created}/{CUSTOMERS_PER_CYCLE}")
+            sleep_until_next_cycle(cycle_started_at, STREAM_INTERVAL_SECONDS)
 
     finally:
         conn.close()

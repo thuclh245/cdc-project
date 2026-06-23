@@ -19,5 +19,11 @@ def sleep_random(min_seconds=0.2, max_seconds=1.5):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
 
+def sleep_until_next_cycle(cycle_started_at, interval_seconds):
+    """Keep a stable cadence even when a cycle itself takes a few seconds."""
+    elapsed = time.monotonic() - cycle_started_at
+    time.sleep(max(0, interval_seconds - elapsed))
+
+
 def log_event(event_name, message):
     print(f"[{event_name}] {message}")
