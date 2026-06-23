@@ -37,6 +37,7 @@ DROP TABLE IF EXISTS ecommerce_ods.products_sink;
 DROP TABLE IF EXISTS ecommerce_ods.orders_sink;
 DROP TABLE IF EXISTS ecommerce_ods.order_items_sink;
 DROP TABLE IF EXISTS ecommerce_ods.payments_sink;
+DROP TABLE IF EXISTS ecommerce_ods.shipments_sink;
 
 CREATE TABLE ecommerce_ods.customers_sink
 (
@@ -139,3 +140,22 @@ CREATE TABLE ecommerce_ods.payments_sink
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY payment_id;
+
+CREATE TABLE ecommerce_ods.shipments_sink
+(
+    shipment_id Int64,
+    order_id Int64,
+    carrier Nullable(String),
+    tracking_number Nullable(String),
+    shipment_status String,
+    shipped_at Nullable(DateTime64(3)),
+    delivered_at Nullable(DateTime64(3)),
+    shipping_address Nullable(String),
+    shipping_city Nullable(String),
+    shipping_country Nullable(String),
+    created_at DateTime64(3),
+    updated_at DateTime64(3),
+    deleted_at Nullable(DateTime64(3))
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY shipment_id;

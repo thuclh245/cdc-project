@@ -1,5 +1,6 @@
 CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'repl_password';
 
+DROP TABLE IF EXISTS shipments CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
 DROP TABLE IF EXISTS payments CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
@@ -94,6 +95,22 @@ CREATE TABLE payments (
     deleted_at TIMESTAMP NULL
 );
 
+CREATE TABLE shipments (
+    shipment_id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL UNIQUE REFERENCES orders(order_id),
+    carrier VARCHAR(100),
+    tracking_number VARCHAR(255),
+    shipment_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    shipped_at TIMESTAMP NULL,
+    delivered_at TIMESTAMP NULL,
+    shipping_address TEXT,
+    shipping_city VARCHAR(100),
+    shipping_country VARCHAR(100) DEFAULT 'Vietnam',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
+);
+
 CREATE INDEX idx_customers_updated_at ON customers(updated_at);
 CREATE INDEX idx_categories_updated_at ON categories(updated_at);
 CREATE INDEX idx_categories_deleted_at ON categories(deleted_at);
@@ -105,6 +122,9 @@ CREATE INDEX idx_order_items_product_id ON order_items(product_id);
 CREATE INDEX idx_order_items_updated_at ON order_items(updated_at);
 CREATE INDEX idx_payments_order_id ON payments(order_id);
 CREATE INDEX idx_payments_updated_at ON payments(updated_at);
+CREATE INDEX idx_shipments_order_id ON shipments(order_id);
+CREATE INDEX idx_shipments_status ON shipments(shipment_status);
+CREATE INDEX idx_shipments_updated_at ON shipments(updated_at);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -144,12 +164,18 @@ BEFORE UPDATE ON payments
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER trg_shipments_updated_at
+BEFORE UPDATE ON shipments
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 ALTER TABLE customers REPLICA IDENTITY FULL;
 ALTER TABLE categories REPLICA IDENTITY FULL;
 ALTER TABLE products REPLICA IDENTITY FULL;
 ALTER TABLE orders REPLICA IDENTITY FULL;
 ALTER TABLE order_items REPLICA IDENTITY FULL;
 ALTER TABLE payments REPLICA IDENTITY FULL;
+ALTER TABLE shipments REPLICA IDENTITY FULL;
 
 DROP PUBLICATION IF EXISTS ecommerce_pub;
 
@@ -159,4 +185,5 @@ CREATE PUBLICATION ecommerce_pub FOR TABLE
     products,
     orders,
     order_items,
-    payments;
+    payments,
+    shipments;

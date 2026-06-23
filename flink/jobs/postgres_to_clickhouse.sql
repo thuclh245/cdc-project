@@ -162,6 +162,34 @@ CREATE TABLE postgres_payments (
     'decoding.plugin.name' = 'pgoutput'
 );
 
+CREATE TABLE postgres_shipments (
+    shipment_id BIGINT,
+    order_id BIGINT,
+    carrier STRING,
+    tracking_number STRING,
+    shipment_status STRING,
+    shipped_at TIMESTAMP(3),
+    delivered_at TIMESTAMP(3),
+    shipping_address STRING,
+    shipping_city STRING,
+    shipping_country STRING,
+    created_at TIMESTAMP(3),
+    updated_at TIMESTAMP(3),
+    deleted_at TIMESTAMP(3),
+    PRIMARY KEY (shipment_id) NOT ENFORCED
+) WITH (
+    'connector' = 'postgres-cdc',
+    'hostname' = 'pg-primary',
+    'port' = '5432',
+    'username' = 'postgres',
+    'password' = 'postgres',
+    'database-name' = 'ecommerce_ods',
+    'schema-name' = 'public',
+    'table-name' = 'shipments',
+    'slot.name' = 'flink_shipments_slot',
+    'decoding.plugin.name' = 'pgoutput'
+);
+
 
 CREATE TABLE clickhouse_customers (
     customer_id BIGINT,
@@ -301,6 +329,31 @@ CREATE TABLE clickhouse_payments (
     'sink.update-strategy' = 'insert'
 );
 
+CREATE TABLE clickhouse_shipments (
+    shipment_id BIGINT,
+    order_id BIGINT,
+    carrier STRING,
+    tracking_number STRING,
+    shipment_status STRING,
+    shipped_at TIMESTAMP(3),
+    delivered_at TIMESTAMP(3),
+    shipping_address STRING,
+    shipping_city STRING,
+    shipping_country STRING,
+    created_at TIMESTAMP(3),
+    updated_at TIMESTAMP(3),
+    deleted_at TIMESTAMP(3),
+    PRIMARY KEY (shipment_id) NOT ENFORCED
+) WITH (
+    'connector' = 'clickhouse',
+    'url' = 'clickhouse://clickhouse:8123',
+    'database-name' = 'ecommerce_ods',
+    'table-name' = 'shipments_sink',
+    'username' = 'default',
+    'password' = '',
+    'sink.update-strategy' = 'insert'
+);
+
 
 EXECUTE STATEMENT SET
 BEGIN
@@ -322,5 +375,8 @@ SELECT * FROM postgres_order_items;
 
 INSERT INTO clickhouse_payments
 SELECT * FROM postgres_payments;
+
+INSERT INTO clickhouse_shipments
+SELECT * FROM postgres_shipments;
 
 END;

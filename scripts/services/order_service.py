@@ -223,6 +223,16 @@ def soft_delete_random_order(conn):
             (order_id,),
         )
 
+        cur.execute(
+            """
+            UPDATE shipments
+            SET deleted_at = CURRENT_TIMESTAMP
+            WHERE order_id = %s
+              AND deleted_at IS NULL
+            """,
+            (order_id,),
+        )
+
     conn.commit()
     log_event("SOFT DELETE ORDER", f"order_id={order_id}")
     return order_id
