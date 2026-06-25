@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Callable
@@ -37,64 +38,241 @@ def parse_decimal(value: str) -> Decimal:
         raise ValueError(f"invalid decimal returned by ClickHouse: {value!r}") from exc
 
 
+def parse_text(value: str) -> str:
+    return value.strip()
+
+
 CHECKS = (
     Check(
-        "active_orders",
-        "SELECT COUNT(*) FROM orders WHERE deleted_at IS NULL",
-        "SELECT count() FROM ecommerce_ods.orders_sink FINAL "
-        "WHERE deleted_at IS NULL",
-        parse_int,
+        "table active/deleted counts",
+        """
+        WITH metrics AS (
+            SELECT 'categories' AS table_name, COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE deleted_at IS NULL) AS active,
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS deleted FROM categories
+            UNION ALL SELECT 'customers', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM customers
+            UNION ALL SELECT 'inventory_movements', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM inventory_movements
+            UNION ALL SELECT 'order_items', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM order_items
+            UNION ALL SELECT 'orders', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM orders
+            UNION ALL SELECT 'payments', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM payments
+            UNION ALL SELECT 'products', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM products
+            UNION ALL SELECT 'shipments', COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL),
+                   COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) FROM shipments
+        )
+        SELECT string_agg(table_name || ':' || total || ':' || active || ':' || deleted, ',' ORDER BY table_name)
+        FROM metrics
+        """,
+        """
+        SELECT arrayStringConcat(groupArray(concat(table_name, ':', toString(total), ':', toString(active), ':', toString(deleted))), ',')
+        FROM (
+            SELECT table_name, total, active, deleted
+            FROM (
+                SELECT 'categories' AS table_name, count() AS total, countIf(deleted_at IS NULL) AS active,
+                       countIf(deleted_at IS NOT NULL) AS deleted FROM ecommerce_ods.categories_sink FINAL
+                UNION ALL SELECT 'customers', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.customers_sink FINAL
+                UNION ALL SELECT 'inventory_movements', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.inventory_movements_sink FINAL
+                UNION ALL SELECT 'order_items', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.order_items_sink FINAL
+                UNION ALL SELECT 'orders', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.orders_sink FINAL
+                UNION ALL SELECT 'payments', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.payments_sink FINAL
+                UNION ALL SELECT 'products', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.products_sink FINAL
+                UNION ALL SELECT 'shipments', count(), countIf(deleted_at IS NULL),
+                       countIf(deleted_at IS NOT NULL) FROM ecommerce_ods.shipments_sink FINAL
+            )
+            ORDER BY table_name
+        )
+        """,
+        parse_text,
     ),
     Check(
-        "revenue",
-        "SELECT COALESCE(SUM(final_amount), 0) FROM orders "
-        "WHERE deleted_at IS NULL",
-        "SELECT coalesce(sum(final_amount), 0) "
-        "FROM ecommerce_ods.orders_sink FINAL WHERE deleted_at IS NULL",
+        "orders revenue",
+        "SELECT COALESCE(SUM(final_amount), 0) FROM orders WHERE deleted_at IS NULL",
+        "SELECT coalesce(sum(final_amount), 0) FROM ecommerce_ods.orders_sink FINAL WHERE deleted_at IS NULL",
         parse_decimal,
     ),
     Check(
-        "customers count",
-        "SELECT COUNT(*) FROM customers",
-        "SELECT count() FROM ecommerce_ods.customers_sink FINAL",
+        "payments total",
+        "SELECT COALESCE(SUM(payment_amount), 0) FROM payments WHERE deleted_at IS NULL",
+        "SELECT coalesce(sum(payment_amount), 0) FROM ecommerce_ods.payments_sink FINAL WHERE deleted_at IS NULL",
+        parse_decimal,
+    ),
+    Check(
+        "product stock total",
+        "SELECT COALESCE(SUM(stock_quantity), 0) FROM products WHERE deleted_at IS NULL",
+        "SELECT coalesce(sum(stock_quantity), 0) FROM ecommerce_ods.products_sink FINAL WHERE deleted_at IS NULL",
         parse_int,
     ),
     Check(
-        "products count",
-        "SELECT COUNT(*) FROM products",
-        "SELECT count() FROM ecommerce_ods.products_sink FINAL",
+        "shipment status counts",
+        """
+        SELECT COALESCE(string_agg(shipment_status || ':' || cnt, ',' ORDER BY shipment_status), '')
+        FROM (
+            SELECT shipment_status, COUNT(*) AS cnt
+            FROM shipments
+            WHERE deleted_at IS NULL
+            GROUP BY shipment_status
+        ) s
+        """,
+        """
+        SELECT coalesce(arrayStringConcat(groupArray(concat(shipment_status, ':', toString(cnt))), ','), '')
+        FROM (
+            SELECT shipment_status, count() AS cnt
+            FROM ecommerce_ods.shipments_sink FINAL
+            WHERE deleted_at IS NULL
+            GROUP BY shipment_status
+            ORDER BY shipment_status
+        )
+        """,
+        parse_text,
+    ),
+    Check(
+        "inventory movement type counts",
+        """
+        SELECT COALESCE(string_agg(movement_type || ':' || cnt, ',' ORDER BY movement_type), '')
+        FROM (
+            SELECT movement_type, COUNT(*) AS cnt
+            FROM inventory_movements
+            WHERE deleted_at IS NULL
+            GROUP BY movement_type
+        ) m
+        """,
+        """
+        SELECT coalesce(arrayStringConcat(groupArray(concat(movement_type, ':', toString(cnt))), ','), '')
+        FROM (
+            SELECT movement_type, count() AS cnt
+            FROM ecommerce_ods.inventory_movements_sink FINAL
+            WHERE deleted_at IS NULL
+            GROUP BY movement_type
+            ORDER BY movement_type
+        )
+        """,
+        parse_text,
+    ),
+    Check(
+        "inventory movement quantity",
+        "SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_movements WHERE deleted_at IS NULL",
+        "SELECT coalesce(sum(quantity_change), 0) FROM ecommerce_ods.inventory_movements_sink FINAL WHERE deleted_at IS NULL",
         parse_int,
     ),
     Check(
-        "order_items count",
-        "SELECT COUNT(*) FROM order_items",
-        "SELECT count() FROM ecommerce_ods.order_items_sink FINAL",
+        "orphan foreign keys",
+        """
+        SELECT
+            (
+                SELECT COUNT(*) FROM orders o
+                LEFT JOIN customers c ON c.customer_id = o.customer_id
+                WHERE o.deleted_at IS NULL AND c.customer_id IS NULL
+            ) +
+            (
+                SELECT COUNT(*) FROM order_items oi
+                LEFT JOIN orders o ON o.order_id = oi.order_id
+                LEFT JOIN products p ON p.product_id = oi.product_id
+                WHERE oi.deleted_at IS NULL AND (o.order_id IS NULL OR p.product_id IS NULL)
+            ) +
+            (
+                SELECT COUNT(*) FROM payments p
+                LEFT JOIN orders o ON o.order_id = p.order_id
+                WHERE p.deleted_at IS NULL AND o.order_id IS NULL
+            ) +
+            (
+                SELECT COUNT(*) FROM shipments s
+                LEFT JOIN orders o ON o.order_id = s.order_id
+                WHERE s.deleted_at IS NULL AND o.order_id IS NULL
+            ) +
+            (
+                SELECT COUNT(*) FROM inventory_movements im
+                LEFT JOIN products p ON p.product_id = im.product_id
+                LEFT JOIN orders o ON o.order_id = im.order_id
+                WHERE im.deleted_at IS NULL
+                  AND (p.product_id IS NULL OR (im.order_id IS NOT NULL AND o.order_id IS NULL))
+            )
+        """,
+        """
+        SELECT
+            (
+                SELECT count() FROM (SELECT * FROM ecommerce_ods.orders_sink FINAL) AS o
+                LEFT JOIN (SELECT * FROM ecommerce_ods.customers_sink FINAL) AS c ON c.customer_id = o.customer_id
+                WHERE o.deleted_at IS NULL AND c.customer_id = 0
+            ) +
+            (
+                SELECT count() FROM (SELECT * FROM ecommerce_ods.order_items_sink FINAL) AS oi
+                LEFT JOIN (SELECT * FROM ecommerce_ods.orders_sink FINAL) AS o ON o.order_id = oi.order_id
+                LEFT JOIN (SELECT * FROM ecommerce_ods.products_sink FINAL) AS p ON p.product_id = oi.product_id
+                WHERE oi.deleted_at IS NULL AND (o.order_id = 0 OR p.product_id = 0)
+            ) +
+            (
+                SELECT count() FROM (SELECT * FROM ecommerce_ods.payments_sink FINAL) AS p
+                LEFT JOIN (SELECT * FROM ecommerce_ods.orders_sink FINAL) AS o ON o.order_id = p.order_id
+                WHERE p.deleted_at IS NULL AND o.order_id = 0
+            ) +
+            (
+                SELECT count() FROM (SELECT * FROM ecommerce_ods.shipments_sink FINAL) AS s
+                LEFT JOIN (SELECT * FROM ecommerce_ods.orders_sink FINAL) AS o ON o.order_id = s.order_id
+                WHERE s.deleted_at IS NULL AND o.order_id = 0
+            ) +
+            (
+                SELECT count() FROM (SELECT * FROM ecommerce_ods.inventory_movements_sink FINAL) AS im
+                LEFT JOIN (SELECT * FROM ecommerce_ods.products_sink FINAL) AS p ON p.product_id = im.product_id
+                LEFT JOIN (SELECT * FROM ecommerce_ods.orders_sink FINAL) AS o ON o.order_id = im.order_id
+                WHERE im.deleted_at IS NULL
+                  AND (p.product_id = 0 OR (im.order_id IS NOT NULL AND o.order_id = 0))
+            )
+        """,
         parse_int,
     ),
     Check(
-        "payments count",
-        "SELECT COUNT(*) FROM payments",
-        "SELECT count() FROM ecommerce_ods.payments_sink FINAL",
-        parse_int,
-    ),
-    Check(
-        "shipments count",
-        "SELECT COUNT(*) FROM shipments",
-        "SELECT count() FROM ecommerce_ods.shipments_sink FINAL",
-        parse_int,
-    ),
-    Check(
-        "inventory_movements count",
-        "SELECT COUNT(*) FROM inventory_movements",
-        "SELECT count() FROM ecommerce_ods.inventory_movements_sink FINAL",
-        parse_int,
-    ),
-    Check(
-        "deleted_orders",
-        "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL",
-        "SELECT count() FROM ecommerce_ods.orders_sink FINAL "
-        "WHERE deleted_at IS NOT NULL",
-        parse_int,
+        "updated row counts",
+        """
+        WITH metrics AS (
+            SELECT 'orders' AS table_name, COUNT(*) AS updated_rows
+            FROM orders
+            WHERE updated_at > created_at
+            UNION ALL SELECT 'payments', COUNT(*)
+            FROM payments
+            WHERE updated_at > created_at
+            UNION ALL SELECT 'shipments', COUNT(*)
+            FROM shipments
+            WHERE updated_at > created_at
+            UNION ALL SELECT 'inventory_movements', COUNT(*)
+            FROM inventory_movements
+            WHERE updated_at > created_at
+        )
+        SELECT string_agg(table_name || ':' || updated_rows, ',' ORDER BY table_name)
+        FROM metrics
+        """,
+        """
+        SELECT arrayStringConcat(groupArray(concat(table_name, ':', toString(updated_rows))), ',')
+        FROM (
+            SELECT table_name, updated_rows
+            FROM (
+                SELECT 'orders' AS table_name, count() AS updated_rows
+                FROM ecommerce_ods.orders_sink FINAL
+                WHERE updated_at > created_at
+                UNION ALL SELECT 'payments', count()
+                FROM ecommerce_ods.payments_sink FINAL
+                WHERE updated_at > created_at
+                UNION ALL SELECT 'shipments', count()
+                FROM ecommerce_ods.shipments_sink FINAL
+                WHERE updated_at > created_at
+                UNION ALL SELECT 'inventory_movements', count()
+                FROM ecommerce_ods.inventory_movements_sink FINAL
+                WHERE updated_at > created_at
+            )
+            ORDER BY table_name
+        )
+        """,
+        parse_text,
     ),
 )
 
@@ -142,9 +320,9 @@ def display_value(value: object) -> str:
     return str(value)
 
 
-def run_checks() -> bool:
+def run_checks_once() -> list[tuple[Check, object, object]]:
     clickhouse = ClickHouseHttpClient()
-    all_matched = True
+    mismatches = []
     postgres = get_conn()
 
     try:
@@ -152,19 +330,57 @@ def run_checks() -> bool:
             pg_value = postgres_scalar(postgres, check.postgres_sql)
             ch_value = clickhouse.scalar(check.clickhouse_sql, check.parser)
 
-            if pg_value == ch_value:
-                print(f"[PASS] {check.name} matched: {display_value(pg_value)}")
-            else:
-                all_matched = False
-                print(
-                    f"[FAIL] {check.name} mismatch: "
-                    f"postgres={display_value(pg_value)} "
-                    f"clickhouse={display_value(ch_value)}"
-                )
+            if pg_value != ch_value:
+                mismatches.append((check, pg_value, ch_value))
     finally:
         postgres.close()
 
-    return all_matched
+    return mismatches
+
+
+def run_checks() -> bool:
+    timeout = float(os.getenv("VALIDATION_POLL_TIMEOUT", "30"))
+    interval = float(os.getenv("VALIDATION_POLL_INTERVAL", "3"))
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    last_mismatches: list[tuple[Check, object, object]] = []
+
+    while True:
+        attempt += 1
+        last_mismatches = run_checks_once()
+        if not last_mismatches:
+            break
+        if time.monotonic() >= deadline:
+            break
+        print(
+            f"[WAIT] {len(last_mismatches)}/{len(CHECKS)} checks still catching up "
+            f"(attempt {attempt}); retrying in {interval:g}s..."
+        )
+        time.sleep(interval)
+
+    failed_names = {check.name for check, _, _ in last_mismatches}
+    for check in CHECKS:
+        mismatch = next(
+            (
+                (pg_value, ch_value)
+                for failed_check, pg_value, ch_value in last_mismatches
+                if failed_check.name == check.name
+            ),
+            None,
+        )
+        if mismatch is None:
+            print(f"[PASS] {check.name}")
+        else:
+            pg_value, ch_value = mismatch
+            print(
+                f"[FAIL] {check.name}: "
+                f"postgres={display_value(pg_value)} "
+                f"clickhouse={display_value(ch_value)}"
+            )
+
+    passed = len(CHECKS) - len(failed_names)
+    print(f"\n{passed}/{len(CHECKS)} PASS")
+    return not last_mismatches
 
 
 def main() -> int:
