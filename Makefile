@@ -1,7 +1,7 @@
 PYTHON ?= $(if $(wildcard venv/bin/python),venv/bin/python,python3)
 COMPOSE ?= docker compose
 
-.PHONY: help up down reset ps logs-flink seed stream pg ch validate
+.PHONY: help up down reset ps logs-flink seed stream pg ch validate verify ready wait-job
 
 help:
 	@echo "Available commands:"
@@ -15,9 +15,10 @@ help:
 	@echo "  make pg          Open a PostgreSQL shell"
 	@echo "  make ch          Open a ClickHouse shell"
 	@echo "  make validate    Compare PostgreSQL and ClickHouse"
-
 up:
 	$(COMPOSE) up -d --build
+	$(MAKE) wait-job
+	$(MAKE) ready
 
 down:
 	$(COMPOSE) down
@@ -25,10 +26,12 @@ down:
 reset:
 	$(COMPOSE) down -v
 	$(COMPOSE) up -d --build
+	$(MAKE) wait-job
+	$(MAKE) ready
 
-stream:
-	$(PYTHON) -m scripts.main_stream
-	
+wait-job:
+	$(COMPOSE) wait flink-job-submitter
+
 ps:
 	$(COMPOSE) ps
 
@@ -49,3 +52,9 @@ ch:
 
 validate:
 	$(PYTHON) -m scripts.validation.compare_postgres_clickhouse
+
+verify:
+	$(PYTHON) -m scripts.validation.verify_stack
+
+ready:
+	$(PYTHON) -m scripts.validation.verify_stack --readiness

@@ -1,5 +1,6 @@
 x-flink-properties: &flink-properties |
   jobmanager.rpc.address: flink-jobmanager
+  rest.address: flink-jobmanager
   jobmanager.execution.failover-strategy: full
   restart-strategy.type: failure-rate
   restart-strategy.failure-rate.max-failures-per-interval: 3
@@ -9,7 +10,7 @@ x-flink-properties: &flink-properties |
   state.checkpoints.dir: file:///opt/flink/checkpoints
   execution.checkpointing.interval: 10 s
   execution.checkpointing.mode: EXACTLY_ONCE
-  execution.checkpointing.timeout: 60 s
+  execution.checkpointing.timeout: 5 min
   execution.checkpointing.max-concurrent-checkpoints: 1
 
 services:
@@ -26,6 +27,12 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     networks:
       - cdc-network
 
@@ -36,19 +43,19 @@ services:
     container_name: flink-jobmanager
     ports:
       - "8081:8081"
-    command: >
-      bash -c "
-      /docker-entrypoint.sh jobmanager &
-      sleep 30 &&
-      sql-client.sh -f /opt/flink/jobs/postgres_to_clickhouse.sql &&
-      wait
-      "
+    command: jobmanager
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_PROPERTIES: *flink-properties
     volumes:
       - ./flink/jobs:/opt/flink/jobs
       - flink_checkpoints_v2:/opt/flink/checkpoints
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8081/overview >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     networks:
       - cdc-network
 
@@ -58,7 +65,8 @@ services:
       dockerfile: Dockerfile
     container_name: flink-taskmanager
     depends_on:
-      - flink-jobmanager
+      flink-jobmanager:
+        condition: service_healthy
     command: taskmanager
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
@@ -66,6 +74,38 @@ services:
     volumes:
       - ./flink/jobs:/opt/flink/jobs
       - flink_checkpoints_v2:/opt/flink/checkpoints
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://flink-jobmanager:8081/taskmanagers | grep --quiet '\"id\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks:
+      - cdc-network
+
+  # Submit the bounded SQL statement set only after every runtime dependency is
+  # actually ready. This replaces the old, timing-dependent `sleep 30`.
+  flink-job-submitter:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-job-submitter
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      flink-jobmanager:
+        condition: service_healthy
+      flink-taskmanager:
+        condition: service_healthy
+    command: /opt/flink/bin/submit-cdc-job.sh
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      FLINK_PROPERTIES: *flink-properties
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs:ro
+    restart: "no"
     networks:
       - cdc-network
 
@@ -91,6 +131,12 @@ services:
     volumes:
       - pg_primary_data:/var/lib/postgresql/data
       - ./postgres-ha/primary-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_ods"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     networks:
       - cdc-network
 
@@ -117,7 +163,14 @@ services:
       exec gosu postgres postgres
       "
     depends_on:
-      - pg-primary
+      pg-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_ods && psql -U postgres -d ecommerce_ods -tAc 'SELECT pg_is_in_recovery()' | grep --quiet t"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     networks:
       - cdc-network
     ports:
@@ -146,7 +199,14 @@ services:
       exec gosu postgres postgres
       "
     depends_on:
-      - pg-primary
+      pg-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_ods && psql -U postgres -d ecommerce_ods -tAc 'SELECT pg_is_in_recovery()' | grep --quiet t"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     networks:
       - cdc-network
     ports:
@@ -156,9 +216,12 @@ services:
     image: haproxy:2.9
     container_name: pg-haproxy
     depends_on:
-      - pg-primary
-      - pg-replica-1
-      - pg-replica-2
+      pg-primary:
+        condition: service_healthy
+      pg-replica-1:
+        condition: service_healthy
+      pg-replica-2:
+        condition: service_healthy
     ports:
       - "15432:5432"
       - "15433:5433"
