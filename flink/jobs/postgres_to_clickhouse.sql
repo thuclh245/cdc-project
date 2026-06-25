@@ -3,7 +3,7 @@ SET 'pipeline.name' = 'ecommerce-postgres-to-clickhouse-cdc';
 
 SET 'execution.checkpointing.interval' = '10 s';
 SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
-SET 'execution.checkpointing.timeout' = '60 s';
+SET 'execution.checkpointing.timeout' = '5 min';
 SET 'execution.checkpointing.max-concurrent-checkpoints' = '1';
 
 CREATE TABLE postgres_customers (
@@ -31,6 +31,10 @@ CREATE TABLE postgres_customers (
     'schema-name' = 'public',
     'table-name' = 'customers',
     'slot.name' = 'flink_customers_slot',
+    'debezium.database.server.name' = 'ecommerce_customers_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -53,6 +57,10 @@ CREATE TABLE postgres_categories (
     'schema-name' = 'public',
     'table-name' = 'categories',
     'slot.name' = 'flink_categories_slot',
+    'debezium.database.server.name' = 'ecommerce_categories_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -79,6 +87,10 @@ CREATE TABLE postgres_products (
     'schema-name' = 'public',
     'table-name' = 'products',
     'slot.name' = 'flink_products_slot',
+    'debezium.database.server.name' = 'ecommerce_products_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -109,6 +121,10 @@ CREATE TABLE postgres_orders (
     'schema-name' = 'public',
     'table-name' = 'orders',
     'slot.name' = 'flink_orders_slot',
+    'debezium.database.server.name' = 'ecommerce_orders_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -134,6 +150,10 @@ CREATE TABLE postgres_order_items (
     'schema-name' = 'public',
     'table-name' = 'order_items',
     'slot.name' = 'flink_order_items_slot',
+    'debezium.database.server.name' = 'ecommerce_order_items_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -159,6 +179,10 @@ CREATE TABLE postgres_payments (
     'schema-name' = 'public',
     'table-name' = 'payments',
     'slot.name' = 'flink_payments_slot',
+    'debezium.database.server.name' = 'ecommerce_payments_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -187,6 +211,10 @@ CREATE TABLE postgres_shipments (
     'schema-name' = 'public',
     'table-name' = 'shipments',
     'slot.name' = 'flink_shipments_slot',
+    'debezium.database.server.name' = 'ecommerce_shipments_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
@@ -213,6 +241,10 @@ CREATE TABLE postgres_inventory_movements (
     'schema-name' = 'public',
     'table-name' = 'inventory_movements',
     'slot.name' = 'flink_inventory_movements_slot',
+    'debezium.database.server.name' = 'ecommerce_inventory_movements_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
     'decoding.plugin.name' = 'pgoutput'
 );
 
