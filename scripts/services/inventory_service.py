@@ -6,6 +6,10 @@ from scripts.common.utils import log_event
 MOVEMENT_TYPES = {"IMPORT", "SALE", "RETURN", "ADJUSTMENT", "CANCEL_ORDER"}
 
 
+class InsufficientStockError(ValueError):
+    """Raised when an order cannot reserve the requested stock."""
+
+
 def record_inventory_movement(
     conn,
     *,
@@ -70,7 +74,7 @@ def decrease_stock_for_sale(conn, product_id, quantity, order_id):
         stock = cur.fetchone()
 
     if stock is None:
-        raise ValueError(
+        raise InsufficientStockError(
             f"insufficient stock for product_id={product_id}, quantity={quantity}"
         )
 

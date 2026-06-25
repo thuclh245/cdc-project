@@ -24,14 +24,23 @@ def main():
         print(f"products  = {product_count}")
         print(f"orders    = {order_count}")
 
-        if customer_count == 0:
-            seed_customers(conn, SEED_CUSTOMERS)
+        missing_customers = max(0, SEED_CUSTOMERS - customer_count)
+        missing_products = max(0, SEED_PRODUCTS - product_count)
+        missing_orders = max(0, SEED_ORDERS - order_count)
 
-        if product_count == 0:
-            seed_products(conn, SEED_PRODUCTS)
+        if missing_customers:
+            seed_customers(conn, missing_customers)
 
-        if order_count == 0:
-            seed_orders(conn, SEED_ORDERS)
+        if missing_products:
+            seed_products(conn, missing_products)
+
+        if missing_orders:
+            seed_orders(conn, missing_orders)
+
+        print("Final data:")
+        print(f"customers = {table_count(conn, 'customers')}")
+        print(f"products  = {table_count(conn, 'products')}")
+        print(f"orders    = {table_count(conn, 'orders')}")
 
         print("Seed completed.")
 

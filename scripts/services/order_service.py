@@ -10,11 +10,10 @@ from scripts.common.utils import (
 from scripts.services.customer_service import get_random_customer_id, insert_customer
 from scripts.services.product_service import (
     get_random_product,
-    get_product_by_id,
-    insert_product,
 )
 from scripts.services.inventory_service import (
     decrease_stock_for_sale,
+    InsufficientStockError,
     restore_stock_for_cancelled_order,
 )
 from scripts.services.payment_service import (
@@ -31,123 +30,134 @@ ORDER_TRANSITIONS = {
 }
 
 
-def insert_order(conn, payment_probability=0.8):
-    customer_id = get_random_customer_id(conn)
+def insert_order(conn, payment_probability=0.8, *, log=True):
+    """Create one complete order as a single database transaction."""
+    try:
+        customer_id = get_random_customer_id(conn)
 
-    if customer_id is None:
-        customer_id = insert_customer(conn)
+        if customer_id is None:
+            customer_id = insert_customer(conn, commit=False, log=False)
 
-    item_count = random.randint(1, 5)
-    order_items = []
-    total_amount = Decimal("0.00")
+        item_count = random.randint(1, 5)
+        order_items = []
+        selected_product_ids = []
+        total_amount = Decimal("0.00")
 
-    for _ in range(item_count):
-        product = get_random_product(conn)
-
-        if product is None:
-            product_id = insert_product(conn)
-            product = get_product_by_id(conn, product_id)
-
-        product_id, unit_price = product
-
-        quantity = random.randint(1, 5)
-        discount_amount = random_discount()
-        item_total = Decimal(unit_price) * quantity - discount_amount
-
-        if item_total < 0:
-            item_total = Decimal("0.00")
-
-        order_items.append(
-            {
-                "product_id": product_id,
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "discount_amount": discount_amount,
-                "total_amount": item_total,
-            }
-        )
-
-        total_amount += item_total
-
-    shipping_fee = random_shipping_fee()
-    order_discount = random_discount()
-
-    final_amount = total_amount + shipping_fee - order_discount
-
-    if final_amount < 0:
-        final_amount = Decimal("0.00")
-
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO orders (
-                customer_id,
-                order_status,
-                order_date,
-                total_amount,
-                discount_amount,
-                shipping_fee,
-                final_amount,
-                payment_status,
-                shipping_address,
-                shipping_city,
-                shipping_country
+        for _ in range(item_count):
+            quantity = random.randint(1, 5)
+            product = get_random_product(
+                conn,
+                minimum_stock=quantity,
+                excluded_product_ids=selected_product_ids,
             )
-            VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING order_id
-            """,
-            (
-                customer_id,
-                random.choice(["PENDING", "CONFIRMED"]),
-                total_amount,
-                order_discount,
-                shipping_fee,
-                final_amount,
-                "UNPAID",
-                fake.address(),
-                fake.city(),
-                "Vietnam",
-            ),
-        )
 
-        order_id = cur.fetchone()[0]
+            if product is None:
+                raise InsufficientStockError(
+                    f"no product has at least {quantity} units available"
+                )
 
-        for item in order_items:
+            product_id, unit_price = product
+            selected_product_ids.append(product_id)
+            discount_amount = random_discount()
+            item_total = Decimal(unit_price) * quantity - discount_amount
+
+            if item_total < 0:
+                item_total = Decimal("0.00")
+
+            order_items.append(
+                {
+                    "product_id": product_id,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "discount_amount": discount_amount,
+                    "total_amount": item_total,
+                }
+            )
+
+            total_amount += item_total
+
+        shipping_fee = random_shipping_fee()
+        order_discount = random_discount()
+        final_amount = total_amount + shipping_fee - order_discount
+
+        if final_amount < 0:
+            final_amount = Decimal("0.00")
+
+        with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO order_items (
-                    order_id,
-                    product_id,
-                    quantity,
-                    unit_price,
+                INSERT INTO orders (
+                    customer_id,
+                    order_status,
+                    order_date,
+                    total_amount,
                     discount_amount,
-                    total_amount
+                    shipping_fee,
+                    final_amount,
+                    payment_status,
+                    shipping_address,
+                    shipping_city,
+                    shipping_country
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING order_id
                 """,
                 (
-                    order_id,
-                    item["product_id"],
-                    item["quantity"],
-                    item["unit_price"],
-                    item["discount_amount"],
-                    item["total_amount"],
+                    customer_id,
+                    random.choice(["PENDING", "CONFIRMED"]),
+                    total_amount,
+                    order_discount,
+                    shipping_fee,
+                    final_amount,
+                    "UNPAID",
+                    fake.address(),
+                    fake.city(),
+                    "Vietnam",
                 ),
             )
+            order_id = cur.fetchone()[0]
 
-            decrease_stock_for_sale(
-                conn,
-                item["product_id"],
-                item["quantity"],
-                order_id,
-            )
+            for item in order_items:
+                cur.execute(
+                    """
+                    INSERT INTO order_items (
+                        order_id,
+                        product_id,
+                        quantity,
+                        unit_price,
+                        discount_amount,
+                        total_amount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        order_id,
+                        item["product_id"],
+                        item["quantity"],
+                        item["unit_price"],
+                        item["discount_amount"],
+                        item["total_amount"],
+                    ),
+                )
 
-        if random.random() < payment_probability:
-            payment_id, payment_status = insert_payment(conn, order_id, final_amount)
-            update_order_payment_status(conn, order_id, payment_status)
+                decrease_stock_for_sale(
+                    conn,
+                    item["product_id"],
+                    item["quantity"],
+                    order_id,
+                )
 
-    conn.commit()
-    log_event("INSERT ORDER", f"order_id={order_id}, final_amount={final_amount}")
+            if random.random() < payment_probability:
+                _, payment_status = insert_payment(conn, order_id, final_amount)
+                update_order_payment_status(conn, order_id, payment_status)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    if log:
+        log_event("INSERT ORDER", f"order_id={order_id}, final_amount={final_amount}")
     return order_id
 
 

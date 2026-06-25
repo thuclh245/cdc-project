@@ -10,7 +10,7 @@ from scripts.services.inventory_service import record_inventory_movement
 fake = Faker("vi_VN")
 
 
-def insert_product(conn):
+def insert_product(conn, *, log=True):
     price = random_money()
     cost = (price * Decimal(str(random.uniform(0.5, 0.8)))).quantize(Decimal("0.01"))
     initial_stock = random.randint(20, 1000)
@@ -54,11 +54,19 @@ def insert_product(conn):
         reason="Initial stock for new product",
     )
     conn.commit()
-    log_event("INSERT PRODUCT", f"product_id={product_id}")
+    if log:
+        log_event("INSERT PRODUCT", f"product_id={product_id}")
     return product_id
 
 
-def get_random_product(conn):
+def get_random_product(conn, minimum_stock=1, excluded_product_ids=None):
+    """Lock and return one sellable product with enough stock.
+
+    The lock is held until the caller commits or rolls back, so an order can
+    validate and reserve inventory in the same transaction.
+    """
+    excluded_product_ids = excluded_product_ids or []
+
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -66,10 +74,13 @@ def get_random_product(conn):
             FROM products
             WHERE deleted_at IS NULL
               AND product_status = 'ACTIVE'
-              AND stock_quantity > 0
+              AND stock_quantity >= %s
+              AND NOT (product_id = ANY(%s::BIGINT[]))
             ORDER BY random()
             LIMIT 1
-            """
+            FOR UPDATE SKIP LOCKED
+            """,
+            (minimum_stock, excluded_product_ids),
         )
 
         row = cur.fetchone()
