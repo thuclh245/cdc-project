@@ -1,0 +1,47 @@
+groups:
+  - name: cdc-stack
+    rules:
+      - alert: PostgresExporterDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL exporter is down
+          description: Prometheus cannot scrape postgres-exporter.
+
+      - alert: ClickHouseMetricsDown
+        expr: up{job="clickhouse",instance="clickhouse:9363"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: ClickHouse metrics endpoint is down
+          description: Prometheus cannot scrape the native ClickHouse metrics endpoint.
+
+      - alert: FlinkMetricsDown
+        expr: up{job="flink"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Flink metrics endpoint is down
+          description: Prometheus cannot scrape one of the Flink Prometheus reporter endpoints.
+
+      - alert: CDCValidationFailed
+        expr: cdc_validation_pass == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: CDC validation is failing
+          description: One or more PostgreSQL vs ClickHouse consistency checks are failing.
+
+      - alert: CDCValidationStale
+        expr: time() - cdc_validation_last_run_timestamp_seconds > 180
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: CDC validation exporter is stale
+          description: CDC validation metrics have not refreshed for more than three minutes.
