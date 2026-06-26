@@ -124,6 +124,11 @@ Default endpoints:
 | Flink UI | `8081` | Theo dõi CDC job |
 | ClickHouse HTTP | `8123` | Validation/query HTTP |
 | ClickHouse native | `9000` | `clickhouse-client` |
+| ClickHouse metrics | `9363` | Prometheus native metrics |
+| Prometheus | `9090` | Metrics and alert rules |
+| Grafana | `3000` | CDC dashboards |
+| cAdvisor | `8085` | Container metrics |
+| CDC validation exporter | `9108` | Validation metrics |
 
 ## Quick Start
 
@@ -465,10 +470,13 @@ Dự án tập trung vào local/demo production-like CDC:
 - Đã có ClickHouse latest-state sink.
 - Đã có seed, stream và validation `9/9 PASS`.
 - Đã có checkpoint config cơ bản.
+- Đã có Prometheus/Grafana monitoring v2.
+- Đã có CDC validation exporter và alert rules cơ bản.
 
 Chưa phải production hoàn chỉnh:
 
-- Chưa có monitoring/alerting đầy đủ.
+- Chưa có Alertmanager/notification channel.
+- Chưa có custom PostgreSQL slot-lag exporter.
 - Chưa có Kubernetes deployment.
 - Chưa có secret management.
 - Chưa có schema migration automation.
