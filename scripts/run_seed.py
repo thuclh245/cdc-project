@@ -1,8 +1,22 @@
 from scripts.database.connection import get_conn
-from scripts.common.constants import SEED_CUSTOMERS, SEED_PRODUCTS, SEED_ORDERS
+from scripts.common.constants import SEED_CATEGORIES, SEED_CUSTOMERS, SEED_PRODUCTS, SEED_ORDERS
+from scripts.seeders.seed_categories import seed_categories
 from scripts.seeders.seed_customers import seed_customers
 from scripts.seeders.seed_products import seed_products
 from scripts.seeders.seed_orders import seed_orders
+from scripts.seeders.seed_shipments import seed_shipments
+
+
+CDC_TABLES = (
+    "customers",
+    "categories",
+    "products",
+    "orders",
+    "order_items",
+    "payments",
+    "shipments",
+    "inventory_movements",
+)
 
 
 def table_count(conn, table_name):
@@ -11,25 +25,43 @@ def table_count(conn, table_name):
         return cur.fetchone()[0]
 
 
+def table_counts(conn):
+    return {table: table_count(conn, table) for table in CDC_TABLES}
+
+
+def print_counts(title, counts):
+    print(title)
+    for table in CDC_TABLES:
+        print(f"{table:19} = {counts[table]}")
+
+
+def verify_seeded_cdc_tables(counts):
+    empty_tables = [table for table, count in counts.items() if count == 0]
+    if empty_tables:
+        raise RuntimeError(
+            "CDC source tables must not be empty after seed: "
+            + ", ".join(empty_tables)
+        )
+    print("All CDC source tables contain seed data.")
+
+
 def main():
     conn = get_conn()
 
     try:
-        customer_count = table_count(conn, "customers")
-        product_count = table_count(conn, "products")
-        order_count = table_count(conn, "orders")
+        counts = table_counts(conn)
+        print_counts("Current data:", counts)
 
-        print("Current data:")
-        print(f"customers = {customer_count}")
-        print(f"products  = {product_count}")
-        print(f"orders    = {order_count}")
-
-        missing_customers = max(0, SEED_CUSTOMERS - customer_count)
-        missing_products = max(0, SEED_PRODUCTS - product_count)
-        missing_orders = max(0, SEED_ORDERS - order_count)
+        missing_customers = max(0, SEED_CUSTOMERS - counts["customers"])
+        missing_categories = max(0, SEED_CATEGORIES - counts["categories"])
+        missing_products = max(0, SEED_PRODUCTS - counts["products"])
+        missing_orders = max(0, SEED_ORDERS - counts["orders"])
 
         if missing_customers:
             seed_customers(conn, missing_customers)
+
+        if missing_categories:
+            seed_categories(conn)
 
         if missing_products:
             seed_products(conn, missing_products)
@@ -37,10 +69,11 @@ def main():
         if missing_orders:
             seed_orders(conn, missing_orders)
 
-        print("Final data:")
-        print(f"customers = {table_count(conn, 'customers')}")
-        print(f"products  = {table_count(conn, 'products')}")
-        print(f"orders    = {table_count(conn, 'orders')}")
+        seed_shipments(conn)
+
+        final_counts = table_counts(conn)
+        print_counts("Final data:", final_counts)
+        verify_seeded_cdc_tables(final_counts)
 
         print("Seed completed.")
 
