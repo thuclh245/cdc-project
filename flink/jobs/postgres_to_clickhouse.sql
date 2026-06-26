@@ -1,10 +1,12 @@
 SET 'execution.runtime-mode' = 'streaming';
 SET 'pipeline.name' = 'ecommerce-postgres-to-clickhouse-cdc';
 
-SET 'execution.checkpointing.interval' = '10 s';
+SET 'execution.checkpointing.interval' = '30 s';
 SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
-SET 'execution.checkpointing.timeout' = '5 min';
+SET 'execution.checkpointing.timeout' = '3 min';
+SET 'execution.checkpointing.min-pause' = '10 s';
 SET 'execution.checkpointing.max-concurrent-checkpoints' = '1';
+SET 'execution.checkpointing.tolerable-failed-checkpoints' = '3';
 SET 'execution.attached' = 'false';
 
 CREATE TABLE postgres_customers (
