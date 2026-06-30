@@ -253,12 +253,12 @@ def main() -> None:
     args = parser.parse_args()
 
     verify_tables()
-    verify_seed_data()
     job_id = verify_jobs_and_slots()
     verify_logs()
     if args.readiness:
         print("CDC stack is ready for seed traffic.")
     else:
+        verify_seed_data()
         verify_checkpoints(job_id)
         print("CDC stack verification passed.")
 

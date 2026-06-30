@@ -6,10 +6,21 @@ import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from scripts.database.connection import get_conn
 from scripts.validation.compare_postgres_clickhouse import CHECKS, run_checks_once
 
 
 CHECK_NAMES = [check.name for check in CHECKS]
+CDC_TABLES = (
+    "customers",
+    "categories",
+    "products",
+    "orders",
+    "order_items",
+    "payments",
+    "shipments",
+    "inventory_movements",
+)
 CHECK_LABELS = {
     name: name.lower()
     .replace(" ", "_")
@@ -24,6 +35,10 @@ STATE = {
     "up": 0,
     "failed_checks": len(CHECKS),
     "checks": {name: 0 for name in CHECK_NAMES},
+    "source_tables": {table: 0 for table in CDC_TABLES},
+    "source_table_seeded": {table: 0 for table in CDC_TABLES},
+    "replication_slots": {},
+    "active_replication_slots": 0,
     "error": "",
 }
 
@@ -59,6 +74,49 @@ def render_metrics() -> str:
         label = CHECK_LABELS[name]
         lines.append(f'cdc_validation_check_pass{{check="{label}"}} {STATE["checks"][name]}')
 
+    lines.extend(
+        [
+            "# HELP cdc_source_table_rows PostgreSQL source table row count.",
+            "# TYPE cdc_source_table_rows gauge",
+        ]
+    )
+    for table, rows in STATE["source_tables"].items():
+        lines.append(f'cdc_source_table_rows{{table="{table}"}} {rows}')
+
+    lines.extend(
+        [
+            "# HELP cdc_source_table_seeded Whether the PostgreSQL source table contains at least one row.",
+            "# TYPE cdc_source_table_seeded gauge",
+        ]
+    )
+    for table, seeded in STATE["source_table_seeded"].items():
+        lines.append(f'cdc_source_table_seeded{{table="{table}"}} {seeded}')
+
+    lines.extend(
+        [
+            "# HELP cdc_postgres_active_logical_replication_slots Number of active logical replication slots.",
+            "# TYPE cdc_postgres_active_logical_replication_slots gauge",
+            f"cdc_postgres_active_logical_replication_slots {STATE['active_replication_slots']}",
+            "# HELP cdc_postgres_replication_slot_active Whether a logical replication slot is active.",
+            "# TYPE cdc_postgres_replication_slot_active gauge",
+        ]
+    )
+    for slot, values in STATE["replication_slots"].items():
+        lines.append(
+            f'cdc_postgres_replication_slot_active{{slot="{slot}"}} {values["active"]}'
+        )
+
+    lines.extend(
+        [
+            "# HELP cdc_postgres_replication_slot_lag_bytes WAL bytes retained for each logical replication slot.",
+            "# TYPE cdc_postgres_replication_slot_lag_bytes gauge",
+        ]
+    )
+    for slot, values in STATE["replication_slots"].items():
+        lines.append(
+            f'cdc_postgres_replication_slot_lag_bytes{{slot="{slot}"}} {values["lag_bytes"]}'
+        )
+
     return "\n".join(lines) + "\n"
 
 
@@ -67,19 +125,76 @@ def refresh_state() -> None:
     STATE["last_run"] = time.time()
     try:
         mismatches = run_checks_once()
+        source_tables = load_source_table_counts()
+        replication_slots = load_replication_slots()
     except Exception as exc:  # noqa: BLE001 - exporter should report, not crash.
         STATE["up"] = 0
         STATE["failed_checks"] = len(CHECKS)
         STATE["checks"] = {name: 0 for name in CHECK_NAMES}
+        STATE["source_tables"] = {table: 0 for table in CDC_TABLES}
+        STATE["source_table_seeded"] = {table: 0 for table in CDC_TABLES}
+        STATE["replication_slots"] = {}
+        STATE["active_replication_slots"] = 0
         STATE["error"] = str(exc) or exc.__class__.__name__
     else:
         failed = {check.name for check, _, _ in mismatches}
         STATE["up"] = 1
         STATE["failed_checks"] = len(failed)
         STATE["checks"] = {name: 0 if name in failed else 1 for name in CHECK_NAMES}
+        STATE["source_tables"] = source_tables
+        STATE["source_table_seeded"] = {
+            table: 1 if count > 0 else 0 for table, count in source_tables.items()
+        }
+        STATE["replication_slots"] = replication_slots
+        STATE["active_replication_slots"] = sum(
+            values["active"] for values in replication_slots.values()
+        )
         STATE["error"] = ""
     finally:
         STATE["last_duration"] = time.monotonic() - started
+
+
+def load_source_table_counts() -> dict[str, int]:
+    sql = (
+        "SELECT table_name, row_count FROM ("
+        + " UNION ALL ".join(
+            f"SELECT '{table}' AS table_name, COUNT(*) AS row_count FROM {table}"
+            for table in CDC_TABLES
+        )
+        + ") counts ORDER BY table_name"
+    )
+    postgres = get_conn()
+    try:
+        with postgres.cursor() as cursor:
+            cursor.execute(sql)
+            return {table: int(count) for table, count in cursor.fetchall()}
+    finally:
+        postgres.close()
+
+
+def load_replication_slots() -> dict[str, dict[str, int]]:
+    sql = """
+        SELECT
+            slot_name,
+            CASE WHEN active THEN 1 ELSE 0 END AS active,
+            COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0)::bigint AS lag_bytes
+        FROM pg_replication_slots
+        WHERE slot_type = 'logical'
+        ORDER BY slot_name
+    """
+    postgres = get_conn()
+    try:
+        with postgres.cursor() as cursor:
+            cursor.execute(sql)
+            return {
+                slot_name: {
+                    "active": int(active),
+                    "lag_bytes": int(lag_bytes),
+                }
+                for slot_name, active, lag_bytes in cursor.fetchall()
+            }
+    finally:
+        postgres.close()
 
 
 class MetricsHandler(BaseHTTPRequestHandler):

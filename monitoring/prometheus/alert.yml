@@ -45,3 +45,30 @@ groups:
         annotations:
           summary: CDC validation exporter is stale
           description: CDC validation metrics have not refreshed for more than three minutes.
+
+      - alert: CDCSourceTableEmpty
+        expr: cdc_source_table_seeded == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: CDC source table has no seed data
+          description: "PostgreSQL CDC source table {{ $labels.table }} is empty."
+
+      - alert: PostgresLogicalReplicationSlotInactive
+        expr: cdc_postgres_replication_slot_active == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL logical replication slot is inactive
+          description: "Logical replication slot {{ $labels.slot }} is inactive."
+
+      - alert: PostgresLogicalReplicationSlotLagHigh
+        expr: cdc_postgres_replication_slot_lag_bytes > 104857600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL logical replication slot lag is high
+          description: "Logical replication slot {{ $labels.slot }} is retaining more than 100 MiB of WAL."
