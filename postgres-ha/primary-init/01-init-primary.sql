@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
 DROP TABLE IF EXISTS customers CASCADE;
+DROP TABLE IF EXISTS cdc_latency_probe CASCADE;
 
 CREATE TABLE customers (
     customer_id BIGSERIAL PRIMARY KEY,
@@ -126,6 +127,16 @@ CREATE TABLE inventory_movements (
     deleted_at TIMESTAMP NULL
 );
 
+CREATE TABLE cdc_latency_probe (
+    probe_id BIGSERIAL PRIMARY KEY,
+    probe_key VARCHAR(255) NOT NULL,
+    payload TEXT,
+    source_updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL
+);
+
 CREATE INDEX idx_customers_updated_at ON customers(updated_at);
 CREATE INDEX idx_categories_updated_at ON categories(updated_at);
 CREATE INDEX idx_categories_deleted_at ON categories(deleted_at);
@@ -144,6 +155,9 @@ CREATE INDEX idx_inventory_product_id ON inventory_movements(product_id);
 CREATE INDEX idx_inventory_order_id ON inventory_movements(order_id);
 CREATE INDEX idx_inventory_type ON inventory_movements(movement_type);
 CREATE INDEX idx_inventory_updated_at ON inventory_movements(updated_at);
+CREATE INDEX idx_cdc_latency_probe_key ON cdc_latency_probe(probe_key);
+CREATE INDEX idx_cdc_latency_probe_source_updated_at ON cdc_latency_probe(source_updated_at);
+CREATE INDEX idx_cdc_latency_probe_updated_at ON cdc_latency_probe(updated_at);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -193,6 +207,11 @@ BEFORE UPDATE ON inventory_movements
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER trg_cdc_latency_probe_updated_at
+BEFORE UPDATE ON cdc_latency_probe
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 ALTER TABLE customers REPLICA IDENTITY FULL;
 ALTER TABLE categories REPLICA IDENTITY FULL;
 ALTER TABLE products REPLICA IDENTITY FULL;
@@ -201,6 +220,7 @@ ALTER TABLE order_items REPLICA IDENTITY FULL;
 ALTER TABLE payments REPLICA IDENTITY FULL;
 ALTER TABLE shipments REPLICA IDENTITY FULL;
 ALTER TABLE inventory_movements REPLICA IDENTITY FULL;
+ALTER TABLE cdc_latency_probe REPLICA IDENTITY FULL;
 
 DROP PUBLICATION IF EXISTS ecommerce_pub;
 
@@ -212,4 +232,5 @@ CREATE PUBLICATION ecommerce_pub FOR TABLE
     order_items,
     payments,
     shipments,
-    inventory_movements;
+    inventory_movements,
+    cdc_latency_probe;

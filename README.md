@@ -35,7 +35,7 @@ ClickHouse ReplacingMergeTree sink
 
 ## Data Model
 
-Pipeline hiện đồng bộ 8 bảng e-commerce:
+Pipeline hiện đồng bộ 8 bảng e-commerce và 1 bảng probe vận hành để đo latency CDC:
 
 | PostgreSQL source | ClickHouse sink | Nội dung |
 | --- | --- | --- |
@@ -47,6 +47,7 @@ Pipeline hiện đồng bộ 8 bảng e-commerce:
 | `payments` | `payments_sink` | Giao dịch thanh toán |
 | `shipments` | `shipments_sink` | Vận chuyển |
 | `inventory_movements` | `inventory_movements_sink` | Lịch sử biến động tồn kho |
+| `cdc_latency_probe` | `cdc_latency_probe_sink` | Probe đo độ trễ CDC |
 
 Tất cả bảng source có `created_at`, `updated_at`, `deleted_at`. Dự án dùng soft delete thông qua `deleted_at` để phù hợp với CDC/OLAP và vẫn giữ được trạng thái lịch sử khi đối chiếu dữ liệu.
 
@@ -219,6 +220,14 @@ Dùng `Ctrl+C` để dừng stream.
 
 Nên chạy `make validate` sau khi stream đã chạy một lúc, hoặc tạm dừng stream nếu cần một kết quả validation ổn định tuyệt đối.
 
+### 5. Đo latency CDC
+
+```bash
+make latency
+```
+
+Lệnh này ghi các probe row vào PostgreSQL, poll ClickHouse cho tới khi row xuất hiện ở `cdc_latency_probe_sink`, rồi in p50/p95/p99/max latency.
+
 ## Các Lệnh Kiểm Tra
 
 ### Readiness check
@@ -230,9 +239,9 @@ make ready
 Kiểm tra:
 
 - PostgreSQL có đủ 8 application tables.
-- ClickHouse có đủ 8 sink tables.
+- PostgreSQL và ClickHouse có đủ 8 application tables cộng `cdc_latency_probe`.
 - Flink CDC job đang `RUNNING`.
-- 8 logical replication slots đang active.
+- 9 logical replication slots đang active.
 - Flink logs không có error marker nghiêm trọng.
 
 ### Data consistency check
@@ -309,6 +318,7 @@ Dùng `FINAL` khi đối chiếu correctness vì sink tables dùng `ReplacingMer
 | `make logs-flink` | Xem log Flink JobManager/TaskManager |
 | `make seed` | Seed PostgreSQL |
 | `make stream` | Chạy fake realtime workload |
+| `make latency` | Đo latency PostgreSQL commit tới ClickHouse visible |
 | `make ready` | Kiểm tra runtime readiness |
 | `make validate` | Đối chiếu PostgreSQL vs ClickHouse |
 | `make verify` | Kiểm tra sâu hơn, gồm checkpoint progress |
@@ -363,6 +373,7 @@ Một số điểm quan trọng:
   - `flink_payments_slot`
   - `flink_shipments_slot`
   - `flink_inventory_movements_slot`
+  - `flink_cdc_latency_probe_slot`
 
 `execution.attached = false` giúp job tiếp tục chạy sau khi SQL client submitter đóng session.
 
@@ -393,7 +404,7 @@ docker exec pg-primary psql -U postgres -d ecommerce_ods -Atc \
   "SELECT slot_name, active FROM pg_replication_slots WHERE slot_type='logical' ORDER BY slot_name"
 ```
 
-Expected: 8 slots, tất cả active.
+Expected: 9 slots, tất cả active.
 
 ### Kiểm tra Flink logs
 
@@ -472,6 +483,7 @@ Dự án tập trung vào local/demo production-like CDC:
 - Đã có checkpoint config cơ bản.
 - Đã có Prometheus/Grafana monitoring v2.
 - Đã có CDC validation exporter và alert rules cơ bản.
+- Đã có CDC latency probe, benchmark command và dashboard latency.
 
 Chưa phải production hoàn chỉnh:
 

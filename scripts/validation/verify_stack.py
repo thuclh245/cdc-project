@@ -11,6 +11,7 @@ import urllib.request
 
 
 EXPECTED_PG_TABLES = {
+    "cdc_latency_probe",
     "customers",
     "categories",
     "products",

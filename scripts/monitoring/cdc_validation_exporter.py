@@ -5,9 +5,14 @@ from __future__ import annotations
 import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from math import ceil
 
 from scripts.database.connection import get_conn
-from scripts.validation.compare_postgres_clickhouse import CHECKS, run_checks_once
+from scripts.validation.compare_postgres_clickhouse import (
+    CHECKS,
+    ClickHouseHttpClient,
+    run_checks_once,
+)
 
 
 CHECK_NAMES = [check.name for check in CHECKS]
@@ -39,6 +44,15 @@ STATE = {
     "source_table_seeded": {table: 0 for table in CDC_TABLES},
     "replication_slots": {},
     "active_replication_slots": 0,
+    "latency_up": 0,
+    "latency_error": "",
+    "latency_samples": [],
+    "latency_samples_window": 0,
+    "latency_last": 0.0,
+    "latency_p50": 0.0,
+    "latency_p95": 0.0,
+    "latency_p99": 0.0,
+    "latency_max": 0.0,
     "error": "",
 }
 
@@ -117,6 +131,32 @@ def render_metrics() -> str:
             f'cdc_postgres_replication_slot_lag_bytes{{slot="{slot}"}} {values["lag_bytes"]}'
         )
 
+    lines.extend(
+        [
+            "# HELP cdc_latency_up Whether latency probe metrics refreshed successfully.",
+            "# TYPE cdc_latency_up gauge",
+            f"cdc_latency_up {STATE['latency_up']}",
+            "# HELP cdc_latency_last_seconds CDC latency for the latest newly observed probe sample.",
+            "# TYPE cdc_latency_last_seconds gauge",
+            f"cdc_latency_last_seconds {STATE['latency_last']:.6f}",
+            "# HELP cdc_latency_p50_seconds Median CDC latency over samples seen by this exporter.",
+            "# TYPE cdc_latency_p50_seconds gauge",
+            f"cdc_latency_p50_seconds {STATE['latency_p50']:.6f}",
+            "# HELP cdc_latency_p95_seconds 95th percentile CDC latency over samples seen by this exporter.",
+            "# TYPE cdc_latency_p95_seconds gauge",
+            f"cdc_latency_p95_seconds {STATE['latency_p95']:.6f}",
+            "# HELP cdc_latency_p99_seconds 99th percentile CDC latency over samples seen by this exporter.",
+            "# TYPE cdc_latency_p99_seconds gauge",
+            f"cdc_latency_p99_seconds {STATE['latency_p99']:.6f}",
+            "# HELP cdc_latency_max_seconds Max CDC latency over samples seen by this exporter.",
+            "# TYPE cdc_latency_max_seconds gauge",
+            f"cdc_latency_max_seconds {STATE['latency_max']:.6f}",
+            "# HELP cdc_latency_samples_window Latency probe samples in the exporter lookback window.",
+            "# TYPE cdc_latency_samples_window gauge",
+            f"cdc_latency_samples_window {STATE['latency_samples_window']}",
+        ]
+    )
+
     return "\n".join(lines) + "\n"
 
 
@@ -150,6 +190,7 @@ def refresh_state() -> None:
             values["active"] for values in replication_slots.values()
         )
         STATE["error"] = ""
+        refresh_latency_state()
     finally:
         STATE["last_duration"] = time.monotonic() - started
 
@@ -195,6 +236,61 @@ def load_replication_slots() -> dict[str, dict[str, int]]:
             }
     finally:
         postgres.close()
+
+
+def refresh_latency_state() -> None:
+    try:
+        new_samples = load_new_latency_samples()
+    except Exception as exc:  # noqa: BLE001 - latency should not break validation.
+        STATE["latency_up"] = 0
+        STATE["latency_error"] = str(exc) or exc.__class__.__name__
+        return
+
+    STATE["latency_samples"] = new_samples
+    STATE["latency_samples_window"] = len(new_samples)
+    STATE["latency_last"] = new_samples[-1] if new_samples else 0.0
+
+    samples = STATE["latency_samples"]
+    STATE["latency_up"] = 1
+    STATE["latency_error"] = ""
+    STATE["latency_p50"] = percentile(samples, 50)
+    STATE["latency_p95"] = percentile(samples, 95)
+    STATE["latency_p99"] = percentile(samples, 99)
+    STATE["latency_max"] = max(samples) if samples else 0.0
+
+
+def load_new_latency_samples() -> list[float]:
+    lookback_seconds = int(os.getenv("CDC_LATENCY_EXPORTER_LOOKBACK_SECONDS", "3600"))
+    sql = f"""
+        SELECT
+            probe_id,
+            greatest(
+                0,
+                toUnixTimestamp64Micro(sink_observed_at)
+                - toUnixTimestamp64Micro(source_updated_at)
+            ) / 1000000
+        FROM ecommerce_ods.cdc_latency_probe_sink FINAL
+        WHERE deleted_at IS NULL
+          AND sink_observed_at > source_updated_at
+          AND source_updated_at >= now64(6) - INTERVAL {lookback_seconds} SECOND
+        ORDER BY probe_id
+    """
+    raw = ClickHouseHttpClient().scalar(sql, lambda value: value.strip())
+
+    if not raw:
+        return []
+
+    samples = [float(line.split("\t", 1)[1]) for line in raw.splitlines()]
+    STATE["latency_samples_window"] = len(samples)
+    return samples
+
+
+def percentile(samples: list[float], percent: int) -> float:
+    if not samples:
+        return 0.0
+    ordered = sorted(samples)
+    index = max(0, ceil((percent / 100) * len(ordered)) - 1)
+    return ordered[index]
 
 
 class MetricsHandler(BaseHTTPRequestHandler):

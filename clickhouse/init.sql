@@ -39,6 +39,7 @@ DROP TABLE IF EXISTS ecommerce_ods.order_items_sink;
 DROP TABLE IF EXISTS ecommerce_ods.payments_sink;
 DROP TABLE IF EXISTS ecommerce_ods.shipments_sink;
 DROP TABLE IF EXISTS ecommerce_ods.inventory_movements_sink;
+DROP TABLE IF EXISTS ecommerce_ods.cdc_latency_probe_sink;
 
 CREATE TABLE ecommerce_ods.customers_sink
 (
@@ -177,3 +178,17 @@ CREATE TABLE ecommerce_ods.inventory_movements_sink
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY movement_id;
+
+CREATE TABLE ecommerce_ods.cdc_latency_probe_sink
+(
+    probe_id Int64,
+    probe_key String,
+    payload Nullable(String),
+    source_updated_at DateTime64(6),
+    created_at DateTime64(6),
+    updated_at DateTime64(6),
+    sink_observed_at DateTime64(6) DEFAULT now64(6),
+    deleted_at Nullable(DateTime64(6))
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY probe_id;

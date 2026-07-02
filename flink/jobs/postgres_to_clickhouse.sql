@@ -251,6 +251,32 @@ CREATE TABLE postgres_inventory_movements (
     'decoding.plugin.name' = 'pgoutput'
 );
 
+CREATE TABLE postgres_cdc_latency_probe (
+    probe_id BIGINT,
+    probe_key STRING,
+    payload STRING,
+    source_updated_at TIMESTAMP(6),
+    created_at TIMESTAMP(6),
+    updated_at TIMESTAMP(6),
+    deleted_at TIMESTAMP(6),
+    PRIMARY KEY (probe_id) NOT ENFORCED
+) WITH (
+    'connector' = 'postgres-cdc',
+    'hostname' = 'pg-primary',
+    'port' = '5432',
+    'username' = 'postgres',
+    'password' = 'postgres',
+    'database-name' = 'ecommerce_ods',
+    'schema-name' = 'public',
+    'table-name' = 'cdc_latency_probe',
+    'slot.name' = 'flink_cdc_latency_probe_slot',
+    'debezium.database.server.name' = 'ecommerce_cdc_latency_probe_cdc',
+    'debezium.heartbeat.interval.ms' = '1000',
+    'debezium.publication.name' = 'ecommerce_pub',
+    'debezium.publication.autocreate.mode' = 'disabled',
+    'decoding.plugin.name' = 'pgoutput'
+);
+
 
 CREATE TABLE clickhouse_customers (
     customer_id BIGINT,
@@ -438,6 +464,25 @@ CREATE TABLE clickhouse_inventory_movements (
     'sink.update-strategy' = 'insert'
 );
 
+CREATE TABLE clickhouse_cdc_latency_probe (
+    probe_id BIGINT,
+    probe_key STRING,
+    payload STRING,
+    source_updated_at TIMESTAMP(6),
+    created_at TIMESTAMP(6),
+    updated_at TIMESTAMP(6),
+    deleted_at TIMESTAMP(6),
+    PRIMARY KEY (probe_id) NOT ENFORCED
+) WITH (
+    'connector' = 'clickhouse',
+    'url' = 'clickhouse://clickhouse:8123',
+    'database-name' = 'ecommerce_ods',
+    'table-name' = 'cdc_latency_probe_sink',
+    'username' = 'default',
+    'password' = '',
+    'sink.update-strategy' = 'insert'
+);
+
 
 EXECUTE STATEMENT SET
 BEGIN
@@ -465,5 +510,8 @@ SELECT * FROM postgres_shipments;
 
 INSERT INTO clickhouse_inventory_movements
 SELECT * FROM postgres_inventory_movements;
+
+INSERT INTO clickhouse_cdc_latency_probe
+SELECT * FROM postgres_cdc_latency_probe;
 
 END;
