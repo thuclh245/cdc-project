@@ -721,7 +721,7 @@
       "pluginVersion": "11.0.0",
       "targets": [
         {
-          "expr": "rate(container_cpu_usage_seconds_total{name=~\"pg-primary|flink-jobmanager|flink-taskmanager|clickhouse-sink|cdc-validation-exporter\"}[1m])",
+          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\", image!=\"\", cpu=\"total\", name=~\"pg-primary|flink-jobmanager|flink-taskmanager|clickhouse-sink|cdc-validation-exporter\"}[1m]))",
           "legendFormat": "{{name}}",
           "refId": "A"
         }

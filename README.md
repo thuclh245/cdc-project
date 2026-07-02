@@ -228,6 +228,14 @@ make latency
 
 Lệnh này ghi các probe row vào PostgreSQL, poll ClickHouse cho tới khi row xuất hiện ở `cdc_latency_probe_sink`, rồi in p50/p95/p99/max latency.
 
+### 6. Kiểm thử fault tolerance
+
+```bash
+make fault-tolerance
+```
+
+Lệnh này restart lần lượt Flink TaskManager, Flink JobManager, ClickHouse và CDC validation exporter, sau đó kiểm tra recovery, active logical replication slots, validation dữ liệu và metrics endpoint.
+
 ## Các Lệnh Kiểm Tra
 
 ### Readiness check
@@ -319,6 +327,7 @@ Dùng `FINAL` khi đối chiếu correctness vì sink tables dùng `ReplacingMer
 | `make seed` | Seed PostgreSQL |
 | `make stream` | Chạy fake realtime workload |
 | `make latency` | Đo latency PostgreSQL commit tới ClickHouse visible |
+| `make fault-tolerance` | Restart runtime services và kiểm tra CDC recovery |
 | `make ready` | Kiểm tra runtime readiness |
 | `make validate` | Đối chiếu PostgreSQL vs ClickHouse |
 | `make verify` | Kiểm tra sâu hơn, gồm checkpoint progress |

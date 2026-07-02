@@ -236,7 +236,36 @@ def verify_logs() -> None:
         # A browser tab may keep polling a job ID from before `make reset`.
         # Flink logs that harmless 404 as ERROR, although the current job is healthy.
         stale_ui_poll = "runtime.rest.handler.job" in line and " not found" in line
-        if not stale_ui_poll and any(marker in line for marker in markers):
+        # Intentional fault-tolerance tests restart JobManager/TaskManager and
+        # leave a transient Pekko association failure in the logs. Runtime and
+        # slot checks above prove the current job recovered.
+        transient_flink_restart = (
+            (
+                "ReliableDeliverySupervisor" in line
+                and "Association with remote system" in line
+                and "Connection refused" in line
+            )
+            or "FlinkExpectedException: The TaskExecutor is shutting down" in line
+            or (
+                "DefaultJobLeaderService" in line
+                and "Registration at JobManager failed" in line
+            )
+            or (
+                "EndpointNotStartedException" in line
+                and "rpc endpoint" in line
+                and "has not been started yet" in line
+            )
+            or (
+                "rejected the registration for job" in line
+                and "not responsible for job" in line
+            )
+            or "TaskManager used outdated connection information" in line
+        )
+        if (
+            not stale_ui_poll
+            and not transient_flink_restart
+            and any(marker in line for marker in markers)
+        ):
             matches.append(line)
     if matches:
         preview = "\n".join(matches[-10:])

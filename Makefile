@@ -1,7 +1,7 @@
 PYTHON ?= $(if $(wildcard venv/bin/python),venv/bin/python,python3)
 COMPOSE ?= docker compose
 
-.PHONY: help up down reset ps logs-flink seed stream pg ch validate verify ready wait-job latency
+.PHONY: help up down reset ps logs-flink seed stream pg ch validate verify ready wait-job latency fault-tolerance
 
 help:
 	@echo "Available commands:"
@@ -16,6 +16,7 @@ help:
 	@echo "  make ch          Open a ClickHouse shell"
 	@echo "  make validate    Compare PostgreSQL and ClickHouse"
 	@echo "  make latency     Measure PostgreSQL to ClickHouse CDC latency"
+	@echo "  make fault-tolerance Run CDC fault tolerance restart tests"
 up:
 	$(COMPOSE) up -d --build
 	$(MAKE) wait-job
@@ -56,6 +57,9 @@ validate:
 
 latency:
 	$(PYTHON) -m scripts.benchmark.cdc_latency_benchmark --samples 100 --interval 1
+
+fault-tolerance:
+	$(PYTHON) -m scripts.validation.fault_tolerance_test --scenario all
 
 verify:
 	$(PYTHON) -m scripts.validation.verify_stack
