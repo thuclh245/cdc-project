@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -37,6 +38,18 @@ MIN_SEEDED_ROWS = {
     "shipments": 1,
     "inventory_movements": 1,
 }
+PG_CLI_CONTAINER = os.getenv("POSTGRES_CLI_CONTAINER", "pg-node-1")
+PG_SERVICE_HOST = os.getenv("POSTGRES_SERVICE_HOST", "pg-haproxy")
+PG_WRITE_PORT = os.getenv("POSTGRES_SERVICE_WRITE_PORT", "5432")
+PG_READ_PORT = os.getenv("POSTGRES_SERVICE_READ_PORT", "5433")
+PATRONI_API_ENDPOINTS = tuple(
+    endpoint.strip()
+    for endpoint in os.getenv(
+        "PATRONI_API_ENDPOINTS",
+        "localhost:8008,localhost:8009,localhost:8010",
+    ).split(",")
+    if endpoint.strip()
+)
 
 
 def run(*args: str) -> str:
@@ -46,6 +59,11 @@ def run(*args: str) -> str:
 
 def get_json(path: str) -> dict:
     with urllib.request.urlopen(f"http://localhost:8081{path}", timeout=5) as response:
+        return json.load(response)
+
+
+def get_url_json(url: str, timeout: float = 5.0) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as response:
         return json.load(response)
 
 
@@ -75,13 +93,60 @@ def assert_postgres_tables(actual: set[str]) -> None:
     )
 
 
+def run_psql(sql: str, *, port: str = PG_WRITE_PORT) -> str:
+    return run(
+        "docker", "exec", PG_CLI_CONTAINER, "psql",
+        "-h", PG_SERVICE_HOST,
+        "-p", port,
+        "-U", "postgres",
+        "-d", "ecommerce_ods",
+        "-Atc", sql,
+    )
+
+
+def patroni_statuses() -> list[dict[str, str]]:
+    statuses = []
+    for endpoint in PATRONI_API_ENDPOINTS:
+        url = f"http://{endpoint}/"
+        data = get_url_json(url)
+        statuses.append(
+            {
+                "endpoint": endpoint,
+                "name": str(data.get("name") or endpoint),
+                "role": str(data.get("role") or "unknown"),
+                "state": str(data.get("state") or "unknown"),
+            }
+        )
+    return statuses
+
+
+def verify_postgres_ha() -> None:
+    statuses = patroni_statuses()
+    primaries = [status for status in statuses if status["role"] in {"primary", "master"}]
+    replicas = [status for status in statuses if status["role"] == "replica"]
+    if len(primaries) != 1 or len(replicas) < 2:
+        raise RuntimeError(f"Patroni roles are not healthy: {statuses}")
+
+    write_recovery = run_psql("SELECT pg_is_in_recovery()")
+    if write_recovery != "f":
+        raise RuntimeError(
+            f"HAProxy write endpoint is not routed to primary: pg_is_in_recovery={write_recovery}"
+        )
+
+    read_recovery = run_psql("SELECT pg_is_in_recovery()", port=PG_READ_PORT)
+    if read_recovery != "t":
+        raise RuntimeError(
+            f"HAProxy read endpoint is not routed to a replica: pg_is_in_recovery={read_recovery}"
+        )
+
+    primary = primaries[0]["name"]
+    print(f"[OK] Patroni PostgreSQL HA: primary={primary}, replicas={len(replicas)}")
+    print("[OK] HAProxy write/read endpoints route to primary/replica roles")
+
+
 def verify_tables() -> None:
     pg_tables = lines(
-        run(
-            "docker", "exec", "pg-primary", "psql", "-U", "postgres",
-            "-d", "ecommerce_ods", "-Atc",
-            "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1",
-        )
+        run_psql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1")
     )
     ch_tables = lines(
         run(
@@ -104,10 +169,7 @@ def verify_seed_data() -> None:
     )
     counts = {}
     for row in lines(
-        run(
-            "docker", "exec", "pg-primary", "psql", "-U", "postgres",
-            "-d", "ecommerce_ods", "-Atc", query,
-        )
+        run_psql(query)
     ):
         table, count = row.split(":", 1)
         counts[table] = int(count)
@@ -155,11 +217,9 @@ def verify_jobs_and_slots(timeout: int = 90) -> str:
         running = [job for job in jobs if job.get("state") == "RUNNING"]
         last_states = [(job.get("name"), job.get("state")) for job in jobs]
         last_slots = lines(
-            run(
-                "docker", "exec", "pg-primary", "psql", "-U", "postgres",
-                "-d", "ecommerce_ods", "-Atc",
+            run_psql(
                 "SELECT slot_name FROM pg_replication_slots "
-                "WHERE slot_type='logical' AND active ORDER BY slot_name",
+                "WHERE slot_type='logical' AND active ORDER BY slot_name"
             )
         )
         if len(running) == 1 and last_slots == EXPECTED_SLOTS:
@@ -337,6 +397,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    verify_postgres_ha()
     verify_tables()
     verify_minio()
     job_id = verify_jobs_and_slots()

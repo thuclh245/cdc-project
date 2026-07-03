@@ -1,0 +1,82 @@
+scope: cdc-postgres-ha
+namespace: /service/
+name: "{{PATRONI_NAME}}"
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: "{{PATRONI_REST_CONNECT_ADDRESS}}:8008"
+
+etcd3:
+  hosts: "{{PATRONI_ETCD_HOSTS}}"
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 5
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        hot_standby: "on"
+        listen_addresses: "*"
+        logical_decoding_work_mem: 64MB
+        max_logical_replication_workers: 10
+        max_replication_slots: 20
+        max_wal_senders: 20
+        wal_keep_size: 512MB
+        wal_level: logical
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - host replication replicator 0.0.0.0/0 md5
+    - host all all 0.0.0.0/0 md5
+  users:
+    replicator:
+      password: repl_password
+      options:
+        - replication
+  post_init: /usr/local/bin/patroni-post-init.sh
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: "{{PATRONI_POSTGRES_CONNECT_ADDRESS}}:5432"
+  data_dir: "{{PATRONI_DATA_DIR}}"
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: /tmp/pgpass
+  authentication:
+    superuser:
+      username: postgres
+      password: postgres
+    replication:
+      username: replicator
+      password: repl_password
+  create_replica_methods:
+    - basebackup
+  basebackup:
+    checkpoint: fast
+    verbose: true
+  parameters:
+    hot_standby: "on"
+    listen_addresses: "*"
+    logical_decoding_work_mem: 64MB
+    max_logical_replication_workers: 10
+    max_replication_slots: 20
+    max_wal_senders: 20
+    unix_socket_directories: /var/run/postgresql
+    wal_keep_size: 512MB
+    wal_level: logical
+  pg_hba:
+    - host replication replicator 0.0.0.0/0 md5
+    - host all all 0.0.0.0/0 md5
+
+watchdog:
+  mode: off
+
+tags:
+  clonefrom: false
+  failover_priority: 1
+  noloadbalance: false
+  nosync: false

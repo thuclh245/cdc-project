@@ -2,7 +2,7 @@ PYTHON ?= $(if $(wildcard venv/bin/python),venv/bin/python,python3)
 COMPOSE ?= docker compose
 VERSION3_REPORT_DIR ?= docs/Version 3
 
-.PHONY: help up down reset ps logs-flink minio-state seed stream pg ch validate validate-no-history validation-history validation-check-history verify ready wait-job latency large-load benchmark-300mb benchmark-500mb benchmark-2gb benchmark-3gb benchmark-4gb working-data-300mb fault-tolerance flink-recovery
+.PHONY: help up down reset ps logs-flink minio-state seed stream pg pg-roles ch validate validate-no-history validation-history validation-check-history verify ready wait-job latency large-load benchmark-300mb benchmark-500mb benchmark-2gb benchmark-3gb benchmark-4gb working-data-300mb fault-tolerance flink-recovery pg-failover-test
 
 help:
 	@echo "Available commands:"
@@ -15,6 +15,7 @@ help:
 	@echo "  make seed        Seed PostgreSQL"
 	@echo "  make stream      Start fake data streams"
 	@echo "  make pg          Open a PostgreSQL shell"
+	@echo "  make pg-roles    Show Patroni PostgreSQL HA roles"
 	@echo "  make ch          Open a ClickHouse shell"
 	@echo "  make validate    Compare PostgreSQL and ClickHouse"
 	@echo "  make validate-no-history Compare without writing validation history"
@@ -30,17 +31,18 @@ help:
 	@echo "  make working-data-300mb Reset volumes and load a 300MB working dataset"
 	@echo "  make fault-tolerance Run CDC fault tolerance restart tests"
 	@echo "  make flink-recovery Run Version 3 Phase 2 Flink recovery test"
+	@echo "  make pg-failover-test Run Version 3 Phase 7 PostgreSQL HA failover test"
 up:
-	$(COMPOSE) up -d --build
+	$(COMPOSE) up -d --build --remove-orphans
 	$(MAKE) wait-job
 	$(MAKE) ready
 
 down:
-	$(COMPOSE) down
+	$(COMPOSE) down --remove-orphans
 
 reset:
-	$(COMPOSE) down -v
-	$(COMPOSE) up -d --build
+	$(COMPOSE) down -v --remove-orphans
+	$(COMPOSE) up -d --build --remove-orphans
 	$(MAKE) wait-job
 	$(MAKE) ready
 
@@ -73,7 +75,10 @@ stream:
 	$(PYTHON) -m scripts.main_stream
 
 pg:
-	docker exec -it pg-primary psql -U postgres -d ecommerce_ods
+	docker exec -it pg-node-1 psql -h pg-haproxy -p 5432 -U postgres -d ecommerce_ods
+
+pg-roles:
+	docker exec pg-node-1 /opt/patroni/bin/patronictl -c /tmp/patroni.yml list
 
 ch:
 	docker exec -it clickhouse-sink clickhouse-client
@@ -85,10 +90,10 @@ validate-no-history:
 	VALIDATION_HISTORY_ENABLED=0 $(PYTHON) -m scripts.validation.compare_postgres_clickhouse
 
 validation-history:
-	docker exec pg-primary psql -U postgres -d ecommerce_ods -c "SELECT run_id, started_at, duration_seconds, status, passed_checks, failed_checks, attempts, source, error_message FROM cdc_validation_runs ORDER BY started_at DESC LIMIT 10;"
+	docker exec pg-node-1 psql -h pg-haproxy -p 5432 -U postgres -d ecommerce_ods -c "SELECT run_id, started_at, duration_seconds, status, passed_checks, failed_checks, attempts, source, error_message FROM cdc_validation_runs ORDER BY started_at DESC LIMIT 10;"
 
 validation-check-history:
-	docker exec pg-primary psql -U postgres -d ecommerce_ods -c "SELECT r.run_id, c.check_name, c.passed, c.postgres_value, c.clickhouse_value, c.mismatch_detail FROM cdc_validation_check_results c JOIN cdc_validation_runs r ON r.run_id = c.run_id ORDER BY r.started_at DESC, c.check_name LIMIT 30;"
+	docker exec pg-node-1 psql -h pg-haproxy -p 5432 -U postgres -d ecommerce_ods -c "SELECT r.run_id, c.check_name, c.passed, c.postgres_value, c.clickhouse_value, c.mismatch_detail FROM cdc_validation_check_results c JOIN cdc_validation_runs r ON r.run_id = c.run_id ORDER BY r.started_at DESC, c.check_name LIMIT 30;"
 
 latency:
 	$(PYTHON) -m scripts.benchmark.cdc_latency_benchmark --samples 100 --interval 1
@@ -112,8 +117,8 @@ benchmark-4gb:
 	$(PYTHON) -m scripts.benchmark.large_data_load --target-size 4GB --latency-samples 20 --wait-timeout 300 --report-file "$(VERSION3_REPORT_DIR)/08_PHASE_6_CAPACITY_PLANNING_RESULT_4GB.md"
 
 working-data-300mb:
-	$(COMPOSE) down -v
-	$(COMPOSE) up -d --build
+	$(COMPOSE) down -v --remove-orphans
+	$(COMPOSE) up -d --build --remove-orphans
 	$(MAKE) wait-job
 	$(MAKE) ready
 	$(MAKE) benchmark-300mb
@@ -123,6 +128,9 @@ fault-tolerance:
 
 flink-recovery:
 	$(PYTHON) -m scripts.validation.flink_recovery_test --include-jobmanager --resubmit-after-jobmanager --report-file "$(VERSION3_REPORT_DIR)/04_PHASE_2_FLINK_RECOVERY_RESULT_2026-07-03.md"
+
+pg-failover-test:
+	$(PYTHON) -m scripts.validation.postgres_failover_test --report-file "$(VERSION3_REPORT_DIR)/10_PHASE_7_POSTGRES_HA_RESULT_2026-07-03.md"
 
 verify:
 	$(PYTHON) -m scripts.validation.verify_stack

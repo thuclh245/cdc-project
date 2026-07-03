@@ -29,6 +29,8 @@ services:
     image: prom/prometheus:latest
     container_name: prometheus
     depends_on:
+      alertmanager:
+        condition: service_healthy
       postgres-exporter:
         condition: service_started
       clickhouse:
@@ -42,6 +44,27 @@ services:
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/alert.yml:/etc/prometheus/alert.yml:ro
+    networks:
+      - cdc-network
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.external-url=http://localhost:9093"
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9093/-/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
     networks:
       - cdc-network
 
@@ -84,11 +107,12 @@ services:
       dockerfile: monitoring/cdc-validation-exporter/Dockerfile
     container_name: cdc-validation-exporter
     environment:
-      POSTGRES_HOST: pg-primary
+      POSTGRES_HOST: pg-haproxy
       POSTGRES_PORT: 5432
       POSTGRES_DB: ecommerce_ods
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      PATRONI_NODES: pg-node-1:8008,pg-node-2:8008,pg-node-3:8008
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 8123
       CLICKHOUSE_DB: ecommerce_ods
@@ -97,8 +121,8 @@ services:
       VALIDATION_TIMEOUT: 60
       CDC_VALIDATION_INTERVAL_SECONDS: 300
     depends_on:
-      pg-primary:
-        condition: service_healthy
+      postgres-ready:
+        condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
     ports:
@@ -110,10 +134,10 @@ services:
     image: prometheuscommunity/postgres-exporter:latest
     container_name: postgres-exporter
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:postgres@pg-primary:5432/ecommerce_ods?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@pg-haproxy:5432/ecommerce_ods?sslmode=disable"
     depends_on:
-      pg-primary:
-        condition: service_healthy
+      postgres-ready:
+        condition: service_completed_successfully
     networks:
       - cdc-network
 
@@ -245,8 +269,8 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
-      pg-primary:
-        condition: service_healthy
+      postgres-ready:
+        condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
       flink-jobmanager:
@@ -263,134 +287,179 @@ services:
     networks:
       - cdc-network
 
-  pg-primary:
-    image: postgres:16
-    container_name: pg-primary
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ecommerce_ods
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    container_name: etcd
     command:
-      - "postgres"
-      - "-c"
-      - "wal_level=logical"
-      - "-c"
-      - "max_wal_senders=20"
-      - "-c"
-      - "max_replication_slots=20"
-      - "-c"
-      - "listen_addresses=*"
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-token=cdc-postgres-ha
+      - --initial-cluster-state=new
+    ports:
+      - "2379:2379"
+    volumes:
+      - etcd_data:/etcd-data
+    healthcheck:
+      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl --endpoints=http://localhost:2379 endpoint health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      - cdc-network
+
+  pg-node-1:
+    build:
+      context: ./postgres-ha/patroni
+      dockerfile: Dockerfile
+    container_name: pg-node-1
+    environment:
+      PATRONI_NAME: pg-node-1
+      PATRONI_ETCD_HOSTS: etcd:2379
+      PATRONI_DATA_DIR: /var/lib/postgresql/data
+      PATRONI_POSTGRES_CONNECT_ADDRESS: pg-node-1
+      PATRONI_REST_CONNECT_ADDRESS: pg-node-1
+    depends_on:
+      etcd:
+        condition: service_healthy
     ports:
       - "5433:5432"
+      - "8008:8008"
     volumes:
-      - pg_primary_data:/var/lib/postgresql/data
-      - ./postgres-ha/primary-init:/docker-entrypoint-initdb.d
+      - pg_node1_data:/var/lib/postgresql/data
+      - ./postgres-ha/primary-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_ods"]
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8008/health >/dev/null"]
       interval: 5s
       timeout: 3s
-      retries: 30
-      start_period: 10s
+      retries: 60
+      start_period: 20s
     networks:
       - cdc-network
 
-  pg-replica-1:
-    image: postgres:16
-    container_name: pg-replica-1
+  pg-node-2:
+    build:
+      context: ./postgres-ha/patroni
+      dockerfile: Dockerfile
+    container_name: pg-node-2
     environment:
-      PGPASSWORD: repl_password
-    volumes:
-      - pg_replica1_data:/var/lib/postgresql/data
-    command: >
-      bash -c "
-      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
-        echo 'Waiting for primary...';
-        until gosu postgres pg_isready -h pg-primary -p 5432 -U postgres; do
-          sleep 2;
-        done;
-        echo 'Running pg_basebackup...';
-        rm -rf /var/lib/postgresql/data/*;
-        gosu postgres pg_basebackup -h pg-primary -p 5432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
-        chmod 700 /var/lib/postgresql/data;
-        echo 'Basebackup done.';
-      fi;
-      exec gosu postgres postgres
-      "
+      PATRONI_NAME: pg-node-2
+      PATRONI_ETCD_HOSTS: etcd:2379
+      PATRONI_DATA_DIR: /var/lib/postgresql/data
+      PATRONI_POSTGRES_CONNECT_ADDRESS: pg-node-2
+      PATRONI_REST_CONNECT_ADDRESS: pg-node-2
     depends_on:
-      pg-primary:
+      etcd:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_ods && psql -U postgres -d ecommerce_ods -tAc 'SELECT pg_is_in_recovery()' | grep --quiet t"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 10s
-    networks:
-      - cdc-network
     ports:
       - "5434:5432"
-
-  pg-replica-2:
-    image: postgres:16
-    container_name: pg-replica-2
-    environment:
-      PGPASSWORD: repl_password
+      - "8009:8008"
     volumes:
-      - pg_replica2_data:/var/lib/postgresql/data
-    command: >
-      bash -c "
-      if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
-        echo 'Waiting for primary...';
-        until gosu postgres pg_isready -h pg-primary -p 5432 -U postgres; do
-          sleep 2;
-        done;
-        echo 'Running pg_basebackup...';
-        rm -rf /var/lib/postgresql/data/*;
-        gosu postgres pg_basebackup -h pg-primary -p 5432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R;
-        chmod 700 /var/lib/postgresql/data;
-        echo 'Basebackup done.';
-      fi;
-      exec gosu postgres postgres
-      "
-    depends_on:
-      pg-primary:
-        condition: service_healthy
+      - pg_node2_data:/var/lib/postgresql/data
+      - ./postgres-ha/primary-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_ods && psql -U postgres -d ecommerce_ods -tAc 'SELECT pg_is_in_recovery()' | grep --quiet t"]
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8008/health >/dev/null"]
       interval: 5s
       timeout: 3s
-      retries: 30
-      start_period: 10s
+      retries: 60
+      start_period: 20s
     networks:
       - cdc-network
+
+  pg-node-3:
+    build:
+      context: ./postgres-ha/patroni
+      dockerfile: Dockerfile
+    container_name: pg-node-3
+    environment:
+      PATRONI_NAME: pg-node-3
+      PATRONI_ETCD_HOSTS: etcd:2379
+      PATRONI_DATA_DIR: /var/lib/postgresql/data
+      PATRONI_POSTGRES_CONNECT_ADDRESS: pg-node-3
+      PATRONI_REST_CONNECT_ADDRESS: pg-node-3
+    depends_on:
+      etcd:
+        condition: service_healthy
     ports:
       - "5435:5432"
+      - "8010:8008"
+    volumes:
+      - pg_node3_data:/var/lib/postgresql/data
+      - ./postgres-ha/primary-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8008/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+    networks:
+      - cdc-network
 
   pg-haproxy:
     image: haproxy:2.9
     container_name: pg-haproxy
     depends_on:
-      pg-primary:
-        condition: service_healthy
-      pg-replica-1:
-        condition: service_healthy
-      pg-replica-2:
-        condition: service_healthy
+      pg-node-1:
+        condition: service_started
+      pg-node-2:
+        condition: service_started
+      pg-node-3:
+        condition: service_started
     ports:
       - "15432:5432"
       - "15433:5433"
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    healthcheck:
+      test: ["CMD-SHELL", "haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      - cdc-network
+
+  postgres-ready:
+    image: postgres:16
+    container_name: postgres-ready
+    depends_on:
+      pg-haproxy:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+      POSTGRES_READY_TIMEOUT: 180
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        deadline=$$(( $$(date +%s) + $${POSTGRES_READY_TIMEOUT:-180} ))
+        until [ "$$(date +%s)" -ge "$$deadline" ]; do
+          if psql -h pg-haproxy -p 5432 -U postgres -d ecommerce_ods -Atc "SELECT NOT pg_is_in_recovery()" | grep -q t; then
+            echo "PostgreSQL HA write endpoint is ready."
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Timed out waiting for PostgreSQL HA write endpoint." >&2
+        exit 1
+    restart: "no"
     networks:
       - cdc-network
       
 volumes:
+  alertmanager_data:
   clickhouse_data:
+  etcd_data:
   grafana_data:
   minio_data:
-  pg_primary_data:
-  pg_replica1_data:
-  pg_replica2_data:
+  pg_node1_data:
+  pg_node2_data:
+  pg_node3_data:
 
 networks:
   cdc-network:

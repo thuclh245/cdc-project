@@ -1,4 +1,12 @@
-CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'repl_password';
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'replicator') THEN
+        CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'repl_password';
+    ELSE
+        ALTER ROLE replicator WITH REPLICATION LOGIN PASSWORD 'repl_password';
+    END IF;
+END
+$$;
 
 DROP TABLE IF EXISTS inventory_movements CASCADE;
 DROP TABLE IF EXISTS shipments CASCADE;

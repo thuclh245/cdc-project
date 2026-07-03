@@ -26,7 +26,7 @@ CREATE TABLE postgres_customers (
     PRIMARY KEY (customer_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -52,7 +52,7 @@ CREATE TABLE postgres_categories (
     PRIMARY KEY (category_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -82,7 +82,7 @@ CREATE TABLE postgres_products (
     PRIMARY KEY (product_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -116,7 +116,7 @@ CREATE TABLE postgres_orders (
     PRIMARY KEY (order_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -145,7 +145,7 @@ CREATE TABLE postgres_order_items (
     PRIMARY KEY (order_item_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -174,7 +174,7 @@ CREATE TABLE postgres_payments (
     PRIMARY KEY (payment_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -206,7 +206,7 @@ CREATE TABLE postgres_shipments (
     PRIMARY KEY (shipment_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -236,7 +236,7 @@ CREATE TABLE postgres_inventory_movements (
     PRIMARY KEY (movement_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
@@ -262,7 +262,7 @@ CREATE TABLE postgres_cdc_latency_probe (
     PRIMARY KEY (probe_id) NOT ENFORCED
 ) WITH (
     'connector' = 'postgres-cdc',
-    'hostname' = 'pg-primary',
+    'hostname' = 'pg-haproxy',
     'port' = '5432',
     'username' = 'postgres',
     'password' = 'postgres',
