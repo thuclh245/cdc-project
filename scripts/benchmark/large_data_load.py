@@ -44,7 +44,7 @@ CDC_TABLES = (
 
 SINK_TABLES = {table: f"{table}_sink" for table in CDC_TABLES}
 APP_TABLES = tuple(table for table in CDC_TABLES if table != "cdc_latency_probe")
-DEFAULT_REPORT_DIR = Path("docs/Verrsion 2")
+DEFAULT_REPORT_DIR = Path("docs/Version 3")
 DEFAULT_ORDER_FAMILY_BYTES = 2_500
 
 
@@ -734,6 +734,7 @@ def run_latency_probe(config: LoadConfig) -> dict[str, float | int]:
         "samples": config.latency_samples,
         "observed": len(latencies),
         "timeouts": timeouts,
+        "mean": (sum(latencies) / len(latencies)) if latencies else 0.0,
         "p50": percentile(latencies, 50),
         "p95": percentile(latencies, 95),
         "p99": percentile(latencies, 99),
@@ -779,13 +780,15 @@ def append_report(
     path.parent.mkdir(parents=True, exist_ok=True)
     validation_status = validation.status if validation else "SKIP"
     validation_duration = validation.duration_seconds if validation else None
+    mean = latency.get("mean")
     p95 = latency.get("p95")
     p99 = latency.get("p99")
     row = (
-        f"| {format_bytes(config.target_size_bytes) if config.target_size_bytes else 'custom'} "
+        f"| {format_bytes(source_size)} "
         f"| {sum(source_counts.get(table, 0) for table in APP_TABLES)} "
         f"| {sum(sink_counts.get(table, 0) for table in APP_TABLES)} "
         f"| {format_seconds(catchup_duration)} "
+        f"| {format_seconds(float(mean)) if mean is not None else 'n/a'} "
         f"| {format_seconds(float(p95)) if p95 is not None else 'n/a'} "
         f"| {format_seconds(float(p99)) if p99 is not None else 'n/a'} "
         f"| {format_bytes(max_slot_lag)} "
@@ -802,8 +805,8 @@ def append_report(
 **ClickHouse physical rows:** {physical_sink_rows}
 **Inserted request:** customers={config.customers}, products={config.products}, orders={config.orders}, target={format_bytes(config.target_size_bytes)}
 
-| Data size | Source rows | Sink rows FINAL | Sink catch-up | p95 latency | p99 latency | Max slot lag | Validation duration | Result |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Data size | Source rows | Sink rows FINAL | Sink catch-up | Mean latency | p95 latency | p99 latency | Max slot lag | Validation duration | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 {row}
 **Source counts:** {format_counts(source_counts)}
 
@@ -914,8 +917,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     conn = get_conn()
     try:
         ensure_category_rows(conn)
-        insert_customers(conn, config.customers, config.batch_size, config.run_id)
-        insert_products(conn, config.products, config.batch_size, config.run_id, config.product_stock)
+        if (
+            config.target_size_bytes is not None
+            and source_size_bytes(conn) >= config.target_size_bytes
+        ):
+            print("Target size already reached before dimension load; skipping customers/products.")
+        else:
+            insert_customers(conn, config.customers, config.batch_size, config.run_id)
+            insert_products(conn, config.products, config.batch_size, config.run_id, config.product_stock)
         inserted_orders = load_until_target(conn, config)
         load_duration = time.monotonic() - started
         print(f"Load finished in {format_seconds(load_duration)}; inserted_orders={inserted_orders}")
@@ -946,6 +955,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(f"| Sink catch-up duration | {format_seconds(catchup_duration)} |")
         print(f"| Max slot lag | {format_bytes(slot_lag)} |")
         if latency:
+            print(f"| Latency mean | {format_seconds(float(latency['mean']))} |")
             print(f"| Latency p95 | {format_seconds(float(latency['p95']))} |")
             print(f"| Latency p99 | {format_seconds(float(latency['p99']))} |")
         print(f"| Validation | {validation.status if validation else 'SKIP'} |")

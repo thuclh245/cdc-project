@@ -119,10 +119,10 @@ Default endpoints:
 
 | Service | Host port | Mục đích |
 | --- | ---: | --- |
-| PostgreSQL primary | `5433` | Python seed/stream ghi vào source |
-| PostgreSQL replica 1 | `5434` | Replica check |
-| PostgreSQL replica 2 | `5435` | Replica check |
-| HAProxy write/read | `15432`, `15433` | PostgreSQL proxy |
+| PostgreSQL HA node 1 | `5433`, `8008` | PostgreSQL/Patroni REST |
+| PostgreSQL HA node 2 | `5434`, `8009` | PostgreSQL/Patroni REST |
+| PostgreSQL HA node 3 | `5435`, `8010` | PostgreSQL/Patroni REST |
+| HAProxy write/read | `15432`, `15433` | Role-aware PostgreSQL proxy |
 | Flink UI | `8081` | Theo dõi CDC job |
 | MinIO API | `9001` | S3-compatible checkpoint/savepoint storage |
 | MinIO Console | `9002` | Giao diện quản trị MinIO local |
@@ -130,6 +130,7 @@ Default endpoints:
 | ClickHouse native | `9000` | `clickhouse-client` |
 | ClickHouse metrics | `9363` | Prometheus native metrics |
 | Prometheus | `9090` | Metrics and alert rules |
+| Alertmanager | `9093` | Alert routing and local dev receiver |
 | Grafana | `3000` | CDC dashboards |
 | cAdvisor | `8085` | Container metrics |
 | CDC validation exporter | `9108` | Validation metrics |
@@ -353,7 +354,7 @@ Soft delete được biểu diễn bằng `deleted_at`: row active có `deleted_
 | `make pg` | Mở PostgreSQL shell |
 | `make ch` | Mở ClickHouse shell |
 
-Lưu ý: `make working-data-300mb` có chạy `docker compose down -v`, nghĩa là xóa volume local hiện tại trước khi dựng lại dataset 300MB. Dùng lệnh này khi muốn chuyển môi trường từ dataset lớn về trạng thái làm việc nhẹ.
+Lưu ý: `make working-data-300mb` có chạy `docker compose down -v --remove-orphans`, nghĩa là xóa volume local hiện tại trước khi dựng lại dataset 300MB và dọn container thuộc topology cũ. Dùng lệnh này khi muốn chuyển môi trường từ dataset lớn về trạng thái làm việc nhẹ.
 
 ## Validation Design
 
@@ -409,57 +410,57 @@ Một số điểm quan trọng:
 
 ## Operational Runbook
 
-### Kiểm tra containers
-
-```bash
-make ps
-```
-
-### Kiểm tra Flink job
-
-```bash
-docker exec flink-jobmanager /opt/flink/bin/flink list -a
-```
-
-Expected:
+Runbook chi tiết cho Version 3 nằm tại:
 
 ```text
-ecommerce-postgres-to-clickhouse-cdc (RUNNING)
+docs/Version 3/RUNBOOK_PRODUCTION_LIKE.md
 ```
 
-### Kiểm tra logical replication slots
+Runbook này có checklist xử lý các incident chính: Flink job failed, checkpoint failed, replication slot lag cao, ClickHouse down/disk full, validation mismatch, MinIO checkpoint lỗi, restart/recover pipeline an toàn và quy định dùng `make reset`.
+
+### Quick triage
 
 ```bash
-docker exec pg-primary psql -U postgres -d ecommerce_ods -Atc \
-  "SELECT slot_name, active FROM pg_replication_slots WHERE slot_type='logical' ORDER BY slot_name"
-```
-
-Expected: 9 slots, tất cả active.
-
-### Kiểm tra Flink logs
-
-```bash
-make logs-flink
-```
-
-### Rebuild từ trạng thái sạch
-
-```bash
-make reset
-make seed
+docker compose ps
+docker logs --tail=200 flink-jobmanager
+docker logs --tail=200 flink-taskmanager
+docker exec flink-jobmanager /opt/flink/bin/flink list -a
+make ready
 make validate
+make pg-roles
+docker exec pg-node-1 psql -h pg-haproxy -p 5432 -U postgres -d ecommerce_ods -c "SELECT * FROM pg_replication_slots;"
+docker exec clickhouse-sink clickhouse-client --query "SELECT 1"
+```
+
+Expected khi hệ thống ổn:
+
+- Flink job `ecommerce-postgres-to-clickhouse-cdc` ở trạng thái `RUNNING`.
+- PostgreSQL có 9 logical replication slots, tất cả active.
+- ClickHouse trả `1`.
+- `make ready` pass.
+- `make validate` pass `9/9`.
+
+### Cảnh báo `make reset`
+
+`make reset` chạy `docker compose down -v --remove-orphans`, nghĩa là xóa persisted volumes local gồm PostgreSQL, ClickHouse, MinIO checkpoint/savepoint, Grafana và Alertmanager state, đồng thời dọn container từ topology cũ. Chỉ dùng khi đây là môi trường demo/local có thể mất dữ liệu, hoặc khi đã backup/chấp nhận xóa dữ liệu hiện tại.
+
+Khi chỉ cần stop/start giữ volume, dùng:
+
+```bash
+make down
+make up
 ```
 
 ### HAProxy và giới hạn HA hiện tại
 
 HAProxy hiện cung cấp hai endpoint PostgreSQL:
 
-- Write endpoint route tới `pg-primary`.
-- Read endpoint round-robin tới `pg-replica-1` và `pg-replica-2`.
+- Write endpoint `localhost:15432` route tới Patroni primary hiện tại.
+- Read endpoint `localhost:15433` route tới các Patroni replicas.
 
-HAProxy ở đây là TCP proxy/routing layer. Nó không tự promote replica, không quản lý PostgreSQL timeline, không di chuyển logical replication slot và không làm Flink CDC tự failover. Flink CDC job hiện vẫn cấu hình source host là `pg-primary`.
+Patroni + etcd quản lý leader election và promote replica khi primary dừng. HAProxy dùng Patroni REST API `/primary` và `/replica` để route đúng role. Flink CDC source hiện trỏ `pg-haproxy` thay vì một node vật lý cố định.
 
-Muốn PostgreSQL HA production-like cần thêm Patroni, repmgr hoặc pg_auto_failover. Muốn CDC failover bền hơn cần thiết kế thêm quanh slot/offset, và có thể bổ sung Kafka hoặc durable log layer để replay.
+Giới hạn còn lại là logical replication slot sau failover. Muốn CDC failover bền hơn nữa cần tiếp tục kiểm chứng slot/LSN và có thể bổ sung Kafka hoặc durable log layer để replay.
 
 ## Troubleshooting
 
@@ -524,6 +525,7 @@ Dự án tập trung vào local/demo production-like CDC:
 - Đã có Flink checkpoint/savepoint storage trên MinIO.
 - Đã có Prometheus/Grafana monitoring v2.
 - Đã có CDC validation exporter và alert rules cơ bản.
+- Đã có Alertmanager local receiver và Prometheus alert routing.
 - Đã có CDC latency probe, benchmark command và dashboard latency.
 - Đã có fault tolerance test cho TaskManager, JobManager, ClickHouse và validation exporter.
 - Đã có large data load test tới mốc 5GB.
@@ -532,8 +534,7 @@ Dự án tập trung vào local/demo production-like CDC:
 
 Chưa phải production hoàn chỉnh:
 
-- Chưa có Alertmanager/notification channel.
-- Chưa có custom PostgreSQL slot-lag exporter.
+- Chưa có notification channel thật cho Alertmanager như Slack/email/PagerDuty.
 - Chưa có Kubernetes deployment.
 - Chưa có secret management.
 - Chưa có schema migration automation.
