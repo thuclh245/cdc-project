@@ -1,37 +1,99 @@
-# CDC E-commerce Pipeline: PostgreSQL to ClickHouse with Flink CDC
+# CDC E-commerce Pipeline: PostgreSQL HA to ClickHouse with Flink CDC
 
-Dự án xây dựng một pipeline CDC end-to-end cho mô hình e-commerce, đồng bộ dữ liệu từ PostgreSQL OLTP sang ClickHouse OLAP bằng Apache Flink CDC. Toàn bộ stack được đóng gói bằng Docker Compose, gồm PostgreSQL primary-replica, Flink JobManager/TaskManager, ClickHouse sink, HAProxy và bộ script Python để seed dữ liệu, tạo workload realtime và kiểm tra tính nhất quán dữ liệu.
+Dự án xây dựng một pipeline CDC end-to-end cho mô hình e-commerce, đồng bộ dữ liệu từ PostgreSQL OLTP sang ClickHouse OLAP bằng Apache Flink CDC. Toàn bộ stack được đóng gói bằng Docker Compose, gồm PostgreSQL HA 3 node với Patroni + etcd, HAProxy role-aware, Flink JobManager/TaskManager, MinIO checkpoint/savepoint storage, ClickHouse sink, Prometheus/Grafana/Alertmanager và bộ script Python để seed dữ liệu, tạo workload realtime, benchmark, failover test và kiểm tra tính nhất quán dữ liệu.
 
-Mục tiêu của dự án là mô phỏng một kiến trúc gần production: bắt thay đổi `INSERT`, `UPDATE`, soft delete trên nhiều bảng nghiệp vụ, ghi sang ClickHouse theo dạng latest state, kiểm tra tính đúng đắn của dữ liệu sau CDC và cung cấp một workflow vận hành có thể lặp lại.
+Mục tiêu của dự án là mô phỏng một kiến trúc production-like: bắt thay đổi `INSERT`, `UPDATE`, soft delete trên nhiều bảng nghiệp vụ, ghi sang ClickHouse theo dạng latest state, duy trì state Flink qua S3-compatible storage, kiểm tra tính đúng đắn của dữ liệu sau CDC và cung cấp một workflow vận hành có thể lặp lại.
 
 ## Kiến Trúc
 
-```text
-Host data generators
-        |
-        v
-PostgreSQL primary  ---> PostgreSQL replicas
-        |
-        | logical replication / pgoutput
-        v
-Apache Flink CDC
-        |
-        v
-ClickHouse ReplacingMergeTree sink
+```mermaid
+flowchart LR
+    APP["Seed / Stream / OLTP workload\nmake seed, make stream, tests"] -->|SQL write\nlocalhost:15432 / pg-haproxy:5432| HAP
+
+    subgraph PGHA["PostgreSQL HA source layer"]
+        HAP["pg-haproxy:2.9\nwrite: 15432 -> current primary\nread: 15433 -> replicas\nchecks: /primary, /replica"]
+        ETCD["etcd v3.5.15\nDCS for Patroni\nport 2379\n--enable-v2=true"]
+        PG1["pg-node-1\nPostgreSQL 16 + Patroni\n5433, 8008"]
+        PG2["pg-node-2\nPostgreSQL 16 + Patroni\n5434, 8009"]
+        PG3["pg-node-3\nPostgreSQL 16 + Patroni\n5435, 8010"]
+        READY["postgres-ready\none-shot gate\nwait writable primary"]
+
+        PG1 <-->|leader election\ncluster state| ETCD
+        PG2 <-->|leader election\ncluster state| ETCD
+        PG3 <-->|leader election\ncluster state| ETCD
+        HAP -.->|role health check| PG1
+        HAP -.->|role health check| PG2
+        HAP -.->|role health check| PG3
+        READY -->|psql readiness| HAP
+    end
+
+    subgraph FLINK["Flink CDC processing layer"]
+        FJM["flink-jobmanager\nREST 8081\nmetrics 9249"]
+        FTM["flink-taskmanager\nmetrics 9250->9249\n8 business tables + 1 latency probe"]
+        SUBMIT["flink-job-submitter\none-shot submit-cdc-job.sh"]
+        FJM <--> FTM
+        SUBMIT -->|submit SQL StatementSet| FJM
+    end
+
+    subgraph S3["Durable state storage"]
+        MINIO["minio\nAPI 9001 -> 9000\nConsole 9002 -> 9001\nbucket: flink-state"]
+        MINIOINIT["minio-init\ncreate bucket once"]
+        MINIOINIT --> MINIO
+    end
+
+    subgraph CHLAYER["ClickHouse OLAP sink"]
+        CH["clickhouse-sink\nHTTP 8123, TCP 9000\nPrometheus 9363\n9 ReplacingMergeTree(updated_at) tables"]
+    end
+
+    subgraph OBS["Observability and validation"]
+        PGEX["postgres-exporter\ninternal 9187"]
+        VALEXP["cdc-validation-exporter\n9108\nvalidation + slots + latency + Patroni roles"]
+        CADV["cAdvisor\n8085 -> 8080"]
+        PROM["Prometheus\n9090\nscrape 15s\ncdc-validation 300s"]
+        GRAF["Grafana\n3000\nCDC dashboards"]
+        AM["Alertmanager\n9093\nlocal-dev-null"]
+    end
+
+    SUBMIT -->|depends on postgres-ready| READY
+    FJM -->|depends on minio-init| MINIOINIT
+    FTM -->|depends on minio-init| MINIOINIT
+    SUBMIT -->|depends on minio-init| MINIOINIT
+
+    FTM -->|Postgres CDC connector\npgoutput, ecommerce_pub\n9 logical replication slots\nconnects to pg-haproxy:5432| HAP
+    FJM -->|checkpoints\ns3://flink-state/checkpoints\nsavepoints\ns3://flink-state/savepoints| MINIO
+    FTM -->|ClickHouse sink connector\nsink.update-strategy=insert| CH
+
+    PGEX -->|DATA_SOURCE_NAME\npg-haproxy:5432| HAP
+    VALEXP -->|PostgreSQL counts\npg-haproxy:5432| HAP
+    VALEXP -->|ClickHouse FINAL checks\nclickhouse:8123| CH
+    VALEXP -.->|Patroni role JSON\n/patroni endpoint| PG1
+    VALEXP -.->|Patroni role JSON\n/patroni endpoint| PG2
+    VALEXP -.->|Patroni role JSON\n/patroni endpoint| PG3
+
+    PROM -->|scrape| PGEX
+    PROM -->|scrape| VALEXP
+    PROM -->|scrape| CADV
+    PROM -->|scrape| FJM
+    PROM -->|scrape| FTM
+    PROM -->|scrape| CH
+    PROM -->|alerts| AM
+    GRAF -->|Prometheus datasource| PROM
 ```
 
 ### Thành phần chính
 
 | Component | Vai trò |
 | --- | --- |
-| PostgreSQL 16 primary | OLTP source database, bật logical replication |
-| PostgreSQL replicas | Mô phỏng HA/read replicas |
-| HAProxy | Proxy entry point cho PostgreSQL |
+| PostgreSQL 16 + Patroni | Cụm OLTP source 3 node, role primary/replica do Patroni quyết định |
+| etcd | Distributed Configuration Store cho Patroni leader election |
+| HAProxy | Role-aware PostgreSQL proxy: write tới primary, read tới replicas |
 | Flink 1.18 | Runtime xử lý CDC job |
 | Flink Postgres CDC connector | Đọc WAL/logical replication từ PostgreSQL |
 | Flink ClickHouse connector | Ghi CDC events vào ClickHouse |
 | MinIO | S3-compatible storage cho Flink checkpoint/savepoint |
 | ClickHouse | OLAP sink, dùng `ReplacingMergeTree(updated_at)` |
+| Prometheus/Grafana/Alertmanager | Metrics, dashboard và alert routing cho môi trường local |
+| cdc-validation-exporter | Expose validation, replication slot, latency và Patroni role metrics |
 | Python scripts | Seed data, tạo realtime workload, validate consistency |
 
 ## Data Model
@@ -66,22 +128,33 @@ Lý do: các bảng ClickHouse dùng `ReplacingMergeTree(updated_at)`. Nếu nhi
 ```text
 .
 |-- clickhouse/
-|   `-- init.sql                         # ClickHouse sink schema
+|   |-- init.sql                         # ClickHouse sink schema
+|   `-- config.d/                        # ClickHouse Prometheus config
 |-- flink/
 |   |-- Dockerfile                       # Flink image kèm connector jars
 |   |-- connectors/                      # Postgres CDC + ClickHouse connectors
 |   |-- jobs/postgres_to_clickhouse.sql  # Flink SQL CDC job
 |   `-- submit-cdc-job.sh                # One-shot job submitter
 |-- haproxy/
-|   `-- haproxy.cfg
+|   `-- haproxy.cfg                      # Role-aware Postgres routing
+|-- monitoring/
+|   |-- alertmanager/                    # Alertmanager local config
+|   |-- cdc-validation-exporter/         # Exporter image wrapper
+|   |-- grafana/                         # Provisioned dashboards/datasource
+|   `-- prometheus/                      # Scrape config and alert rules
 |-- postgres-ha/
+|   |-- patroni/                         # Patroni image, entrypoint, template
 |   |-- primary-init/                    # PostgreSQL schema, publication, replica identity
-|   `-- replica-init/
+|   `-- replica-init/                    # Legacy/compat init area
 |-- scripts/
+|   |-- benchmark/                       # Latency, large-load, stress-stream benchmark
+|   |-- common/                          # Shared script utilities
+|   |-- database/                        # Database connection helpers
+|   |-- monitoring/                      # Validation exporter implementation
 |   |-- seeders/                         # Seed dữ liệu ban đầu
 |   |-- services/                        # Business write/update logic
 |   |-- streams/                         # Fake realtime workload
-|   `-- validation/                      # Runtime và data consistency checks
+|   `-- validation/                      # Readiness, consistency, recovery, failover tests
 |-- docker-compose.yml
 |-- Makefile
 `-- docs/
@@ -119,6 +192,7 @@ Default endpoints:
 
 | Service | Host port | Mục đích |
 | --- | ---: | --- |
+| etcd | `2379` | DCS cho Patroni |
 | PostgreSQL HA node 1 | `5433`, `8008` | PostgreSQL/Patroni REST |
 | PostgreSQL HA node 2 | `5434`, `8009` | PostgreSQL/Patroni REST |
 | PostgreSQL HA node 3 | `5435`, `8010` | PostgreSQL/Patroni REST |
@@ -147,7 +221,7 @@ Lệnh này sẽ:
 
 - Xóa containers và volumes cũ.
 - Build Flink image kèm connector.
-- Start PostgreSQL primary/replicas, ClickHouse và Flink.
+- Start PostgreSQL HA nodes, HAProxy, MinIO, ClickHouse, Flink và monitoring stack.
 - Submit Flink CDC SQL job.
 - Chạy readiness check.
 
@@ -239,6 +313,30 @@ make fault-tolerance
 ```
 
 Lệnh này restart lần lượt Flink TaskManager, Flink JobManager, ClickHouse và CDC validation exporter, sau đó kiểm tra recovery, active logical replication slots, validation dữ liệu và metrics endpoint.
+
+Các test chuyên biệt hơn:
+
+```bash
+make flink-recovery
+make pg-failover-test
+make idempotency-order-test
+```
+
+### 7. Chạy throughput stress test
+
+```bash
+make stress-tc1
+make stress-tc2
+make stress-tc3
+make stress-tc4
+make stress-tc5
+```
+
+Các target này chạy các mốc Version 4 từ 100 đến 5,000 events/phút. Có thể tùy biến:
+
+```bash
+make stress-stream STRESS_RATE=1000 STRESS_DURATION=600 STRESS_WARMUP=60
+```
 
 ## Các Lệnh Kiểm Tra
 
@@ -339,6 +437,7 @@ Soft delete được biểu diễn bằng `deleted_at`: row active có `deleted_
 | `make minio-state` | Xem checkpoint/savepoint objects trong MinIO |
 | `make seed` | Seed PostgreSQL |
 | `make stream` | Chạy fake realtime workload |
+| `make pg-roles` | Xem role Patroni hiện tại của các node PostgreSQL |
 | `make latency` | Đo latency PostgreSQL commit tới ClickHouse visible |
 | `make large-load` | Chạy load test dữ liệu lớn, truyền tham số qua `ARGS="..."` |
 | `make benchmark-300mb` | Load/benchmark working dataset 300MB cho Version 3 |
@@ -348,8 +447,21 @@ Soft delete được biểu diễn bằng `deleted_at`: row active có `deleted_
 | `make benchmark-4gb` | Load/benchmark mốc 4GB khi cần scale-up |
 | `make working-data-300mb` | Reset volume và dựng lại dataset làm việc 300MB |
 | `make fault-tolerance` | Restart runtime services và kiểm tra CDC recovery |
+| `make flink-recovery` | Kiểm tra Flink checkpoint/savepoint recovery và ghi report Version 3 |
+| `make pg-failover-test` | Kiểm tra failover PostgreSQL HA qua Patroni/HAProxy và CDC sau failover |
+| `make idempotency-order-test` | Kiểm tra latest-state idempotency/order khi restart TaskManager |
+| `make stress-stream` | Chạy stress stream tùy biến qua `STRESS_RATE`, `STRESS_DURATION`, `STRESS_WARMUP` |
+| `make stress-tc1` | Version 4 throughput test 100 events/min trong 10 phút |
+| `make stress-tc2` | Version 4 throughput test 500 events/min trong 10 phút |
+| `make stress-tc3` | Version 4 throughput test 1,000 events/min trong 10 phút |
+| `make stress-tc4` | Version 4 throughput test 2,000 events/min trong 10 phút |
+| `make stress-tc5` | Version 4 throughput test 5,000 events/min trong 10 phút |
+| `make stress-snapshot` | Snapshot slot lag, DB size, ClickHouse table size và disk usage |
 | `make ready` | Kiểm tra runtime readiness |
 | `make validate` | Đối chiếu PostgreSQL vs ClickHouse |
+| `make validate-no-history` | Đối chiếu dữ liệu nhưng không ghi validation history |
+| `make validation-history` | Xem các lần validation gần nhất trong PostgreSQL |
+| `make validation-check-history` | Xem chi tiết check gần nhất theo từng validation run |
 | `make verify` | Kiểm tra sâu hơn, gồm checkpoint progress |
 | `make pg` | Mở PostgreSQL shell |
 | `make ch` | Mở ClickHouse shell |
@@ -451,7 +563,7 @@ make down
 make up
 ```
 
-### HAProxy và giới hạn HA hiện tại
+### PostgreSQL HA, HAProxy và giới hạn CDC failover hiện tại
 
 HAProxy hiện cung cấp hai endpoint PostgreSQL:
 
@@ -460,7 +572,13 @@ HAProxy hiện cung cấp hai endpoint PostgreSQL:
 
 Patroni + etcd quản lý leader election và promote replica khi primary dừng. HAProxy dùng Patroni REST API `/primary` và `/replica` để route đúng role. Flink CDC source hiện trỏ `pg-haproxy` thay vì một node vật lý cố định.
 
-Giới hạn còn lại là logical replication slot sau failover. Muốn CDC failover bền hơn nữa cần tiếp tục kiểm chứng slot/LSN và có thể bổ sung Kafka hoặc durable log layer để replay.
+Có thể kiểm tra failover bằng:
+
+```bash
+make pg-failover-test
+```
+
+Giới hạn còn lại là độ bền của logical replication slot/LSN sau failover trong các tình huống lỗi phức tạp hơn. Muốn CDC failover bền hơn nữa có thể bổ sung Kafka hoặc durable log layer để replay độc lập với vòng đời primary PostgreSQL.
 
 ## Troubleshooting
 
@@ -519,18 +637,20 @@ Sink tables dùng `ReplacingMergeTree(updated_at)`, nên query không `FINAL` c�
 Dự án tập trung vào local/demo production-like CDC:
 
 - Đã có multi-table CDC.
-- Đã có PostgreSQL primary/replica.
+- Đã có PostgreSQL HA 3 node bằng Patroni + etcd + HAProxy role-aware.
 - Đã có ClickHouse latest-state sink.
 - Đã có seed, stream và validation `9/9 PASS`.
 - Đã có Flink checkpoint/savepoint storage trên MinIO.
-- Đã có Prometheus/Grafana monitoring v2.
+- Đã có Prometheus/Grafana monitoring.
 - Đã có CDC validation exporter và alert rules cơ bản.
 - Đã có Alertmanager local receiver và Prometheus alert routing.
 - Đã có CDC latency probe, benchmark command và dashboard latency.
 - Đã có fault tolerance test cho TaskManager, JobManager, ClickHouse và validation exporter.
+- Đã có Flink recovery, PostgreSQL HA failover và latest-state idempotency/order test.
 - Đã có large data load test tới mốc 5GB.
+- Đã có Version 4 stress-stream commands cho mốc 100 đến 5,000 events/phút.
 - Đã có phân tích ClickHouse `ReplacingMergeTree`/`FINAL` và giới hạn HAProxy.
-- Đã có profile working dataset 300MB cho Version 3 để làm việc nhẹ hơn sau phase 4.
+- Đã có profile working dataset 300MB cho Version 3 để làm việc nhẹ hơn sau các benchmark dataset lớn.
 
 Chưa phải production hoàn chỉnh:
 
@@ -539,7 +659,7 @@ Chưa phải production hoàn chỉnh:
 - Chưa có secret management.
 - Chưa có schema migration automation.
 - Chưa có Kafka buffer layer.
-- Chưa có PostgreSQL automatic failover bằng Patroni/repmgr/pg_auto_failover.
+- Chưa có hardening production cho PostgreSQL HA như backup/PITR, fencing, multi-node etcd thật và chiến lược durable replay để loại bỏ rủi ro slot/LSN sau failover.
 
 ## Demo Flow Gợi Ý
 
