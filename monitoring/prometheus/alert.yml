@@ -1,11 +1,32 @@
 groups:
   - name: cdc-stack
     rules:
+      - alert: CDCValidationExporterDown
+        expr: up{job="cdc-validation"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: validation
+        annotations:
+          summary: CDC validation exporter is down
+          description: Prometheus cannot scrape cdc-validation-exporter.
+
+      - alert: CDCValidationExporterUnhealthy
+        expr: cdc_validation_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: validation
+        annotations:
+          summary: CDC validation exporter cannot run checks
+          description: The exporter is reachable, but the latest PostgreSQL vs ClickHouse validation run failed to execute.
+
       - alert: PostgresExporterDown
         expr: up{job="postgres"} == 0
         for: 1m
         labels:
           severity: critical
+          component: postgres
         annotations:
           summary: PostgreSQL exporter is down
           description: Prometheus cannot scrape postgres-exporter.
@@ -15,6 +36,7 @@ groups:
         for: 1m
         labels:
           severity: critical
+          component: clickhouse
         annotations:
           summary: ClickHouse metrics endpoint is down
           description: Prometheus cannot scrape the native ClickHouse metrics endpoint.
@@ -24,33 +46,97 @@ groups:
         for: 1m
         labels:
           severity: critical
+          component: flink
         annotations:
           summary: Flink metrics endpoint is down
           description: Prometheus cannot scrape one of the Flink Prometheus reporter endpoints.
+
+      - alert: FlinkJobFailing
+        expr: flink_jobmanager_job_failingTime > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: flink
+        annotations:
+          summary: Flink job is failing
+          description: "Flink job {{ $labels.job_name }} is in failing state."
+
+      - alert: FlinkJobRestarting
+        expr: flink_jobmanager_job_restartingTime > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: flink
+        annotations:
+          summary: Flink job is restarting
+          description: "Flink job {{ $labels.job_name }} is restarting."
+
+      - alert: FlinkJobRestartsIncreased
+        expr: increase(flink_jobmanager_job_numRestarts[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: flink
+        annotations:
+          summary: Flink job restart count increased
+          description: "Flink job {{ $labels.job_name }} restarted during the last 10 minutes."
+
+      - alert: FlinkCheckpointFailuresIncreased
+        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: flink
+        annotations:
+          summary: Flink checkpoint failures increased
+          description: "Flink job {{ $labels.job_name }} has failed checkpoints during the last 10 minutes."
 
       - alert: CDCValidationFailed
         expr: cdc_validation_pass == 0
         for: 2m
         labels:
           severity: critical
+          component: validation
         annotations:
           summary: CDC validation is failing
           description: One or more PostgreSQL vs ClickHouse consistency checks are failing.
 
+      - alert: CDCValidationMismatch
+        expr: cdc_validation_failed_checks > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: validation
+        annotations:
+          summary: CDC validation has mismatched checks
+          description: "{{ $value }} PostgreSQL vs ClickHouse validation checks are currently failing."
+
+      - alert: CDCValidationCheckFailed
+        expr: cdc_validation_check_pass == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: validation
+        annotations:
+          summary: CDC validation check failed
+          description: "Validation check {{ $labels.check }} is failing."
+
       - alert: CDCValidationStale
-        expr: time() - cdc_validation_last_run_timestamp_seconds > 180
+        expr: time() - cdc_validation_last_run_timestamp_seconds > 900
         for: 1m
         labels:
           severity: warning
+          component: validation
         annotations:
           summary: CDC validation exporter is stale
-          description: CDC validation metrics have not refreshed for more than three minutes.
+          description: CDC validation metrics have not refreshed for more than 15 minutes.
 
       - alert: CDCSourceTableEmpty
         expr: cdc_source_table_seeded == 0
         for: 1m
         labels:
           severity: warning
+          component: postgres
         annotations:
           summary: CDC source table has no seed data
           description: "PostgreSQL CDC source table {{ $labels.table }} is empty."
@@ -60,6 +146,7 @@ groups:
         for: 1m
         labels:
           severity: critical
+          component: postgres
         annotations:
           summary: PostgreSQL logical replication slot is inactive
           description: "Logical replication slot {{ $labels.slot }} is inactive."
@@ -69,6 +156,57 @@ groups:
         for: 5m
         labels:
           severity: warning
+          component: postgres
         annotations:
           summary: PostgreSQL logical replication slot lag is high
           description: "Logical replication slot {{ $labels.slot }} is retaining more than 100 MiB of WAL."
+
+      - alert: PostgresNoPrimary
+        expr: cdc_postgres_patroni_primary_count == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: postgres
+        annotations:
+          summary: PostgreSQL HA cluster has no primary
+          description: Patroni reports no PostgreSQL primary. HAProxy write traffic cannot be routed safely.
+
+      - alert: PostgresMultiplePrimaries
+        expr: cdc_postgres_patroni_primary_count > 1
+        for: 30s
+        labels:
+          severity: critical
+          component: postgres
+        annotations:
+          summary: PostgreSQL HA cluster reports multiple primaries
+          description: Patroni role metrics show more than one primary. Stop writes and inspect the cluster immediately.
+
+      - alert: PostgresReplicaUnavailable
+        expr: sum(cdc_postgres_patroni_role_replica) < 2
+        for: 2m
+        labels:
+          severity: warning
+          component: postgres
+        annotations:
+          summary: PostgreSQL replica capacity is reduced
+          description: Fewer than two Patroni nodes are currently reporting replica role.
+
+      - alert: CDCLatencyMetricsUnavailable
+        expr: cdc_latency_up == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: validation
+        annotations:
+          summary: CDC latency probe metrics are unavailable
+          description: The validation exporter cannot refresh latency probe metrics from ClickHouse.
+
+      - alert: CDCLatencyP95High
+        expr: cdc_latency_p95_seconds > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: cdc
+        annotations:
+          summary: CDC p95 latency is high
+          description: "CDC latency p95 is {{ $value }} seconds over the exporter lookback window."

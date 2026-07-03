@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import ceil
+from urllib.request import urlopen
 
 from scripts.database.connection import get_conn
 from scripts.validation.compare_postgres_clickhouse import (
@@ -44,6 +46,8 @@ STATE = {
     "source_table_seeded": {table: 0 for table in CDC_TABLES},
     "replication_slots": {},
     "active_replication_slots": 0,
+    "patroni_nodes": {},
+    "patroni_primary_count": 0,
     "latency_up": 0,
     "latency_error": "",
     "latency_samples": [],
@@ -133,6 +137,47 @@ def render_metrics() -> str:
 
     lines.extend(
         [
+            "# HELP cdc_postgres_patroni_node_up Whether the Patroni REST API is reachable for a node.",
+            "# TYPE cdc_postgres_patroni_node_up gauge",
+        ]
+    )
+    for node, values in STATE["patroni_nodes"].items():
+        lines.append(
+            f'cdc_postgres_patroni_node_up{{node="{node}",role="{values["role"]}"}} {values["up"]}'
+        )
+
+    lines.extend(
+        [
+            "# HELP cdc_postgres_patroni_role_primary Whether a Patroni node currently reports primary role.",
+            "# TYPE cdc_postgres_patroni_role_primary gauge",
+        ]
+    )
+    for node, values in STATE["patroni_nodes"].items():
+        lines.append(
+            f'cdc_postgres_patroni_role_primary{{node="{node}"}} {values["primary"]}'
+        )
+
+    lines.extend(
+        [
+            "# HELP cdc_postgres_patroni_role_replica Whether a Patroni node currently reports replica role.",
+            "# TYPE cdc_postgres_patroni_role_replica gauge",
+        ]
+    )
+    for node, values in STATE["patroni_nodes"].items():
+        lines.append(
+            f'cdc_postgres_patroni_role_replica{{node="{node}"}} {values["replica"]}'
+        )
+
+    lines.extend(
+        [
+            "# HELP cdc_postgres_patroni_primary_count Number of Patroni nodes reporting primary role.",
+            "# TYPE cdc_postgres_patroni_primary_count gauge",
+            f"cdc_postgres_patroni_primary_count {STATE['patroni_primary_count']}",
+        ]
+    )
+
+    lines.extend(
+        [
             "# HELP cdc_latency_up Whether latency probe metrics refreshed successfully.",
             "# TYPE cdc_latency_up gauge",
             f"cdc_latency_up {STATE['latency_up']}",
@@ -163,6 +208,11 @@ def render_metrics() -> str:
 def refresh_state() -> None:
     started = time.monotonic()
     STATE["last_run"] = time.time()
+    patroni_nodes = load_patroni_nodes()
+    STATE["patroni_nodes"] = patroni_nodes
+    STATE["patroni_primary_count"] = sum(
+        values["primary"] for values in patroni_nodes.values()
+    )
     try:
         mismatches = run_checks_once()
         source_tables = load_source_table_counts()
@@ -236,6 +286,38 @@ def load_replication_slots() -> dict[str, dict[str, int]]:
             }
     finally:
         postgres.close()
+
+
+def load_patroni_nodes() -> dict[str, dict[str, int | str]]:
+    raw_nodes = os.getenv(
+        "PATRONI_NODES",
+        "pg-node-1:8008,pg-node-2:8008,pg-node-3:8008",
+    )
+    nodes: dict[str, dict[str, int | str]] = {}
+    for target in [value.strip() for value in raw_nodes.split(",") if value.strip()]:
+        node = target.split(":", 1)[0]
+        try:
+            with urlopen(f"http://{target}/", timeout=3) as response:
+                payload = json.load(response)
+        except Exception:  # noqa: BLE001 - metrics should report node down.
+            nodes[node] = {
+                "up": 0,
+                "role": "down",
+                "primary": 0,
+                "replica": 0,
+            }
+            continue
+
+        role = str(payload.get("role") or "unknown")
+        normalized_role = "primary" if role == "master" else role
+        name = str(payload.get("name") or node)
+        nodes[name] = {
+            "up": 1,
+            "role": normalized_role,
+            "primary": 1 if normalized_role == "primary" else 0,
+            "replica": 1 if normalized_role == "replica" else 0,
+        }
+    return nodes
 
 
 def refresh_latency_state() -> None:
