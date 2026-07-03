@@ -30,6 +30,7 @@ ClickHouse ReplacingMergeTree sink
 | Flink 1.18 | Runtime xử lý CDC job |
 | Flink Postgres CDC connector | Đọc WAL/logical replication từ PostgreSQL |
 | Flink ClickHouse connector | Ghi CDC events vào ClickHouse |
+| MinIO | S3-compatible storage cho Flink checkpoint/savepoint |
 | ClickHouse | OLAP sink, dùng `ReplacingMergeTree(updated_at)` |
 | Python scripts | Seed data, tạo realtime workload, validate consistency |
 
@@ -123,6 +124,8 @@ Default endpoints:
 | PostgreSQL replica 2 | `5435` | Replica check |
 | HAProxy write/read | `15432`, `15433` | PostgreSQL proxy |
 | Flink UI | `8081` | Theo dõi CDC job |
+| MinIO API | `9001` | S3-compatible checkpoint/savepoint storage |
+| MinIO Console | `9002` | Giao diện quản trị MinIO local |
 | ClickHouse HTTP | `8123` | Validation/query HTTP |
 | ClickHouse native | `9000` | `clickhouse-client` |
 | ClickHouse metrics | `9363` | Prometheus native metrics |
@@ -332,16 +335,25 @@ Soft delete được biểu diễn bằng `deleted_at`: row active có `deleted_
 | `make down` | Stop services |
 | `make ps` | Xem container status |
 | `make logs-flink` | Xem log Flink JobManager/TaskManager |
+| `make minio-state` | Xem checkpoint/savepoint objects trong MinIO |
 | `make seed` | Seed PostgreSQL |
 | `make stream` | Chạy fake realtime workload |
 | `make latency` | Đo latency PostgreSQL commit tới ClickHouse visible |
 | `make large-load` | Chạy load test dữ liệu lớn, truyền tham số qua `ARGS="..."` |
+| `make benchmark-300mb` | Load/benchmark working dataset 300MB cho Version 3 |
+| `make benchmark-500mb` | Load/benchmark mốc 500MB khi cần tải cao hơn |
+| `make benchmark-2gb` | Load/benchmark mốc 2GB khi cần scale-up |
+| `make benchmark-3gb` | Load/benchmark mốc 3GB khi cần scale-up |
+| `make benchmark-4gb` | Load/benchmark mốc 4GB khi cần scale-up |
+| `make working-data-300mb` | Reset volume và dựng lại dataset làm việc 300MB |
 | `make fault-tolerance` | Restart runtime services và kiểm tra CDC recovery |
 | `make ready` | Kiểm tra runtime readiness |
 | `make validate` | Đối chiếu PostgreSQL vs ClickHouse |
 | `make verify` | Kiểm tra sâu hơn, gồm checkpoint progress |
 | `make pg` | Mở PostgreSQL shell |
 | `make ch` | Mở ClickHouse shell |
+
+Lưu ý: `make working-data-300mb` có chạy `docker compose down -v`, nghĩa là xóa volume local hiện tại trước khi dựng lại dataset 300MB. Dùng lệnh này khi muốn chuyển môi trường từ dataset lớn về trạng thái làm việc nhẹ.
 
 ## Validation Design
 
@@ -509,13 +521,14 @@ Dự án tập trung vào local/demo production-like CDC:
 - Đã có PostgreSQL primary/replica.
 - Đã có ClickHouse latest-state sink.
 - Đã có seed, stream và validation `9/9 PASS`.
-- Đã có checkpoint config cơ bản.
+- Đã có Flink checkpoint/savepoint storage trên MinIO.
 - Đã có Prometheus/Grafana monitoring v2.
 - Đã có CDC validation exporter và alert rules cơ bản.
 - Đã có CDC latency probe, benchmark command và dashboard latency.
 - Đã có fault tolerance test cho TaskManager, JobManager, ClickHouse và validation exporter.
 - Đã có large data load test tới mốc 5GB.
 - Đã có phân tích ClickHouse `ReplacingMergeTree`/`FINAL` và giới hạn HAProxy.
+- Đã có profile working dataset 300MB cho Version 3 để làm việc nhẹ hơn sau phase 4.
 
 Chưa phải production hoàn chỉnh:
 

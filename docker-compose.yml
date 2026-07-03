@@ -7,7 +7,13 @@ x-flink-properties: &flink-properties |
   restart-strategy.failure-rate.failure-rate-interval: 5 min
   restart-strategy.failure-rate.delay: 10 s
   state.backend.type: hashmap
-  state.checkpoints.dir: file:///opt/flink/checkpoints
+  state.checkpoints.dir: s3://${MINIO_FLINK_BUCKET:-flink-state}/checkpoints
+  state.savepoints.dir: s3://${MINIO_FLINK_BUCKET:-flink-state}/savepoints
+  s3.endpoint: http://minio:9000
+  s3.path.style.access: true
+  s3.access-key: ${MINIO_ROOT_USER:-minioadmin}
+  s3.secret-key: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  s3.connection.ssl.enabled: false
   execution.checkpointing.interval: 30 s
   execution.checkpointing.mode: EXACTLY_ONCE
   execution.checkpointing.timeout: 3 min
@@ -135,11 +141,55 @@ services:
     networks:
       - cdc-network
 
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9001:9000"
+      - "9002:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:9000/minio/health/live >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks:
+      - cdc-network
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_FLINK_BUCKET: ${MINIO_FLINK_BUCKET:-flink-state}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-minioadmin}" "${MINIO_ROOT_PASSWORD:-minioadmin}" &&
+        mc mb --ignore-existing "local/${MINIO_FLINK_BUCKET:-flink-state}" &&
+        mc anonymous set none "local/${MINIO_FLINK_BUCKET:-flink-state}" &&
+        mc ls "local/${MINIO_FLINK_BUCKET:-flink-state}"
+    restart: "no"
+    networks:
+      - cdc-network
+
   flink-jobmanager:
     build:
       context: ./flink
       dockerfile: Dockerfile
     container_name: flink-jobmanager
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "8081:8081"
       - "9249:9249"
@@ -149,7 +199,6 @@ services:
       FLINK_PROPERTIES: *flink-properties
     volumes:
       - ./flink/jobs:/opt/flink/jobs
-      - flink_checkpoints_v2:/opt/flink/checkpoints
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://localhost:8081/overview >/dev/null"]
       interval: 5s
@@ -165,6 +214,8 @@ services:
       dockerfile: Dockerfile
     container_name: flink-taskmanager
     depends_on:
+      minio-init:
+        condition: service_completed_successfully
       flink-jobmanager:
         condition: service_healthy
     command: taskmanager
@@ -175,7 +226,6 @@ services:
       FLINK_PROPERTIES: *flink-properties
     volumes:
       - ./flink/jobs:/opt/flink/jobs
-      - flink_checkpoints_v2:/opt/flink/checkpoints
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://flink-jobmanager:8081/taskmanagers | grep --quiet '\"id\"'"]
       interval: 5s
@@ -193,6 +243,8 @@ services:
       dockerfile: Dockerfile
     container_name: flink-job-submitter
     depends_on:
+      minio-init:
+        condition: service_completed_successfully
       pg-primary:
         condition: service_healthy
       clickhouse:
@@ -334,8 +386,8 @@ services:
       
 volumes:
   clickhouse_data:
-  flink_checkpoints_v2:
   grafana_data:
+  minio_data:
   pg_primary_data:
   pg_replica1_data:
   pg_replica2_data:

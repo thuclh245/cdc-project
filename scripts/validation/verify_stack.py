@@ -21,6 +21,10 @@ EXPECTED_PG_TABLES = {
     "shipments",
     "inventory_movements",
 }
+EXPECTED_PG_SUPPORT_TABLES = {
+    "cdc_validation_runs",
+    "cdc_validation_check_results",
+}
 EXPECTED_CH_TABLES = {f"{name}_sink" for name in EXPECTED_PG_TABLES}
 EXPECTED_SLOTS = {f"flink_{name}_slot" for name in EXPECTED_PG_TABLES}
 MIN_SEEDED_ROWS = {
@@ -57,6 +61,20 @@ def assert_equal(label: str, actual: set[str], expected: set[str]) -> None:
     print(f"[OK] {label}: {len(actual)}")
 
 
+def assert_postgres_tables(actual: set[str]) -> None:
+    missing = sorted(EXPECTED_PG_TABLES - actual)
+    unexpected = sorted(actual - EXPECTED_PG_TABLES - EXPECTED_PG_SUPPORT_TABLES)
+    if missing or unexpected:
+        raise RuntimeError(
+            f"PostgreSQL tables: missing={missing}, unexpected={unexpected}"
+        )
+    support_count = len(actual & EXPECTED_PG_SUPPORT_TABLES)
+    print(
+        "[OK] PostgreSQL tables: "
+        f"{len(actual & EXPECTED_PG_TABLES)} CDC source, {support_count} support"
+    )
+
+
 def verify_tables() -> None:
     pg_tables = lines(
         run(
@@ -71,7 +89,7 @@ def verify_tables() -> None:
             "SELECT name FROM system.tables WHERE database='ecommerce_ods' ORDER BY name",
         )
     )
-    assert_equal("PostgreSQL application tables", pg_tables, EXPECTED_PG_TABLES)
+    assert_postgres_tables(pg_tables)
     assert_equal("ClickHouse sink tables", ch_tables, EXPECTED_CH_TABLES)
 
 
@@ -105,6 +123,27 @@ def verify_seed_data() -> None:
             f"{details}. Run `make seed` first."
         )
     print(f"[OK] seeded PostgreSQL CDC source tables: {len(counts)}")
+
+
+def verify_minio() -> None:
+    status = run(
+        "docker", "inspect", "--format",
+        "{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+        "minio",
+    )
+    if status != "healthy":
+        raise RuntimeError(f"MinIO service is not healthy: status={status}")
+
+    run(
+        "docker", "compose", "run", "--rm", "--entrypoint", "/bin/sh",
+        "minio-init", "-c",
+        (
+            'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" '
+            '"$MINIO_ROOT_PASSWORD" >/dev/null && '
+            'mc ls "local/$MINIO_FLINK_BUCKET" >/dev/null'
+        ),
+    )
+    print("[OK] MinIO healthy and flink-state bucket exists")
 
 
 def verify_jobs_and_slots(timeout: int = 90) -> str:
@@ -273,6 +312,22 @@ def verify_logs() -> None:
     print("[OK] no error/exception markers in JobManager/TaskManager logs")
 
 
+def verify_checkpoint_objects() -> None:
+    output = run(
+        "docker", "compose", "run", "--rm", "--entrypoint", "/bin/sh",
+        "minio-init", "-c",
+        (
+            'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" '
+            '"$MINIO_ROOT_PASSWORD" >/dev/null && '
+            'mc ls --recursive "local/$MINIO_FLINK_BUCKET/checkpoints"'
+        ),
+    )
+    objects = lines(output)
+    if not objects:
+        raise RuntimeError("no checkpoint objects found in MinIO under checkpoints/")
+    print(f"[OK] MinIO checkpoint objects visible: {len(objects)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -283,6 +338,7 @@ def main() -> None:
     args = parser.parse_args()
 
     verify_tables()
+    verify_minio()
     job_id = verify_jobs_and_slots()
     verify_logs()
     if args.readiness:
@@ -290,6 +346,7 @@ def main() -> None:
     else:
         verify_seed_data()
         verify_checkpoints(job_id)
+        verify_checkpoint_objects()
         print("CDC stack verification passed.")
 
 

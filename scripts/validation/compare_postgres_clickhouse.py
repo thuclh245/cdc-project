@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -25,6 +26,55 @@ class Check:
     postgres_sql: str
     clickhouse_sql: str
     parser: Callable[[str], object]
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    check: Check
+    postgres_value: object
+    clickhouse_value: object
+    passed: bool
+
+
+VALIDATION_HISTORY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS cdc_validation_runs (
+    run_id BIGSERIAL PRIMARY KEY,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ NOT NULL,
+    duration_seconds NUMERIC(12, 3) NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('PASS', 'FAIL', 'ERROR')),
+    total_checks INTEGER NOT NULL,
+    passed_checks INTEGER NOT NULL,
+    failed_checks INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    source VARCHAR(50) NOT NULL DEFAULT 'cli',
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS cdc_validation_check_results (
+    result_id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES cdc_validation_runs(run_id) ON DELETE CASCADE,
+    check_name TEXT NOT NULL,
+    postgres_value TEXT,
+    clickhouse_value TEXT,
+    passed BOOLEAN NOT NULL,
+    mismatch_detail TEXT,
+    attempt INTEGER NOT NULL,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdc_validation_runs_started_at
+    ON cdc_validation_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cdc_validation_runs_status
+    ON cdc_validation_runs(status);
+CREATE INDEX IF NOT EXISTS idx_cdc_validation_check_results_run_id
+    ON cdc_validation_check_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_cdc_validation_check_results_check_name
+    ON cdc_validation_check_results(check_name);
+CREATE INDEX IF NOT EXISTS idx_cdc_validation_check_results_passed
+    ON cdc_validation_check_results(passed);
+"""
 
 
 def parse_int(value: str) -> int:
@@ -327,9 +377,9 @@ def display_value(value: object) -> str:
     return str(value)
 
 
-def run_checks_once() -> list[tuple[Check, object, object]]:
+def run_check_results_once() -> list[CheckResult]:
     clickhouse = ClickHouseHttpClient()
-    mismatches = []
+    results = []
     postgres = get_conn()
 
     try:
@@ -337,25 +387,163 @@ def run_checks_once() -> list[tuple[Check, object, object]]:
         for check in CHECKS:
             pg_value = postgres_scalar(postgres, check.postgres_sql)
             ch_value = clickhouse.scalar(check.clickhouse_sql, check.parser)
-
-            if pg_value != ch_value:
-                mismatches.append((check, pg_value, ch_value))
+            results.append(
+                CheckResult(
+                    check=check,
+                    postgres_value=pg_value,
+                    clickhouse_value=ch_value,
+                    passed=pg_value == ch_value,
+                )
+            )
     finally:
         postgres.close()
 
+    return results
+
+
+def run_checks_once() -> list[tuple[Check, object, object]]:
+    results = run_check_results_once()
+    mismatches = [
+        (result.check, result.postgres_value, result.clickhouse_value)
+        for result in results
+        if not result.passed
+    ]
     return mismatches
 
 
-def run_checks() -> bool:
+def validation_history_enabled() -> bool:
+    value = os.getenv("VALIDATION_HISTORY_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def validation_history_source() -> str:
+    return os.getenv("VALIDATION_HISTORY_SOURCE", "cli").strip() or "cli"
+
+
+def exception_detail(exc: Exception) -> str:
+    return str(exc).strip() or repr(exc)
+
+
+def mismatch_detail(result: CheckResult) -> str | None:
+    if result.passed:
+        return None
+    return (
+        f"postgres={display_value(result.postgres_value)}; "
+        f"clickhouse={display_value(result.clickhouse_value)}"
+    )
+
+
+def write_validation_history(
+    *,
+    started_at: datetime,
+    duration_seconds: float,
+    attempts: int,
+    results: list[CheckResult],
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    if not validation_history_enabled():
+        return
+
+    finished_at = datetime.now(timezone.utc)
+    passed_checks = sum(1 for result in results if result.passed)
+    failed_checks = len(results) - passed_checks
+    if status == "ERROR" and not results:
+        failed_checks = len(CHECKS)
+
+    postgres = get_conn()
+    try:
+        with postgres:
+            with postgres.cursor() as cursor:
+                cursor.execute(VALIDATION_HISTORY_SCHEMA_SQL)
+                cursor.execute(
+                    """
+                    INSERT INTO cdc_validation_runs (
+                        started_at,
+                        finished_at,
+                        duration_seconds,
+                        status,
+                        total_checks,
+                        passed_checks,
+                        failed_checks,
+                        attempts,
+                        source,
+                        error_message
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING run_id
+                    """,
+                    (
+                        started_at,
+                        finished_at,
+                        round(duration_seconds, 3),
+                        status,
+                        len(CHECKS),
+                        passed_checks,
+                        failed_checks,
+                        attempts,
+                        validation_history_source(),
+                        error_message,
+                    ),
+                )
+                run_id = cursor.fetchone()[0]
+                cursor.executemany(
+                    """
+                    INSERT INTO cdc_validation_check_results (
+                        run_id,
+                        check_name,
+                        postgres_value,
+                        clickhouse_value,
+                        passed,
+                        mismatch_detail,
+                        attempt
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            run_id,
+                            result.check.name,
+                            display_value(result.postgres_value),
+                            display_value(result.clickhouse_value),
+                            result.passed,
+                            mismatch_detail(result),
+                            attempts,
+                        )
+                        for result in results
+                    ],
+                )
+    finally:
+        postgres.close()
+
+
+def record_validation_history_best_effort(**kwargs: object) -> None:
+    try:
+        write_validation_history(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - history must not change validation result.
+        print(
+            f"[WARN] validation history was not written: {exception_detail(exc)}",
+            file=sys.stderr,
+        )
+
+
+def run_checks(started_at: datetime | None = None) -> bool:
     timeout = float(os.getenv("VALIDATION_POLL_TIMEOUT", "30"))
     interval = float(os.getenv("VALIDATION_POLL_INTERVAL", "3"))
+    started_at = started_at or datetime.now(timezone.utc)
+    run_started = time.monotonic()
     deadline = time.monotonic() + timeout
     attempt = 0
-    last_mismatches: list[tuple[Check, object, object]] = []
+    last_results: list[CheckResult] = []
 
     while True:
         attempt += 1
-        last_mismatches = run_checks_once()
+        last_results = run_check_results_once()
+        last_mismatches = [
+            (result.check, result.postgres_value, result.clickhouse_value)
+            for result in last_results
+            if not result.passed
+        ]
         if not last_mismatches:
             break
         if time.monotonic() >= deadline:
@@ -366,36 +554,48 @@ def run_checks() -> bool:
         )
         time.sleep(interval)
 
-    failed_names = {check.name for check, _, _ in last_mismatches}
-    for check in CHECKS:
-        mismatch = next(
-            (
-                (pg_value, ch_value)
-                for failed_check, pg_value, ch_value in last_mismatches
-                if failed_check.name == check.name
-            ),
-            None,
-        )
-        if mismatch is None:
-            print(f"[PASS] {check.name}")
+    failed_names = {
+        result.check.name
+        for result in last_results
+        if not result.passed
+    }
+    for result in last_results:
+        if result.passed:
+            print(f"[PASS] {result.check.name}")
         else:
-            pg_value, ch_value = mismatch
             print(
-                f"[FAIL] {check.name}: "
-                f"postgres={display_value(pg_value)} "
-                f"clickhouse={display_value(ch_value)}"
+                f"[FAIL] {result.check.name}: "
+                f"postgres={display_value(result.postgres_value)} "
+                f"clickhouse={display_value(result.clickhouse_value)}"
             )
 
     passed = len(CHECKS) - len(failed_names)
     print(f"\n{passed}/{len(CHECKS)} PASS")
-    return not last_mismatches
+    record_validation_history_best_effort(
+        started_at=started_at,
+        duration_seconds=time.monotonic() - run_started,
+        attempts=attempt,
+        results=last_results,
+        status="PASS" if not failed_names else "FAIL",
+    )
+    return not failed_names
 
 
 def main() -> int:
+    started_at = datetime.now(timezone.utc)
+    run_started = time.monotonic()
     try:
-        matched = run_checks()
+        matched = run_checks(started_at=started_at)
     except Exception as exc:
-        detail = str(exc) or exc.__class__.__name__
+        detail = exception_detail(exc)
+        record_validation_history_best_effort(
+            started_at=started_at,
+            duration_seconds=time.monotonic() - run_started,
+            attempts=0,
+            results=[],
+            status="ERROR",
+            error_message=detail,
+        )
         print(f"[ERROR] validation could not run: {detail}", file=sys.stderr)
         return 2
 

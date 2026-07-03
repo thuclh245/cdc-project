@@ -9,6 +9,8 @@ DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS categories CASCADE;
 DROP TABLE IF EXISTS customers CASCADE;
 DROP TABLE IF EXISTS cdc_latency_probe CASCADE;
+DROP TABLE IF EXISTS cdc_validation_check_results CASCADE;
+DROP TABLE IF EXISTS cdc_validation_runs CASCADE;
 
 CREATE TABLE customers (
     customer_id BIGSERIAL PRIMARY KEY,
@@ -137,6 +139,33 @@ CREATE TABLE cdc_latency_probe (
     deleted_at TIMESTAMP NULL
 );
 
+CREATE TABLE cdc_validation_runs (
+    run_id BIGSERIAL PRIMARY KEY,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ NOT NULL,
+    duration_seconds NUMERIC(12, 3) NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('PASS', 'FAIL', 'ERROR')),
+    total_checks INTEGER NOT NULL,
+    passed_checks INTEGER NOT NULL,
+    failed_checks INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    source VARCHAR(50) NOT NULL DEFAULT 'cli',
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE cdc_validation_check_results (
+    result_id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES cdc_validation_runs(run_id) ON DELETE CASCADE,
+    check_name TEXT NOT NULL,
+    postgres_value TEXT,
+    clickhouse_value TEXT,
+    passed BOOLEAN NOT NULL,
+    mismatch_detail TEXT,
+    attempt INTEGER NOT NULL,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX idx_customers_updated_at ON customers(updated_at);
 CREATE INDEX idx_categories_updated_at ON categories(updated_at);
 CREATE INDEX idx_categories_deleted_at ON categories(deleted_at);
@@ -158,6 +187,11 @@ CREATE INDEX idx_inventory_updated_at ON inventory_movements(updated_at);
 CREATE INDEX idx_cdc_latency_probe_key ON cdc_latency_probe(probe_key);
 CREATE INDEX idx_cdc_latency_probe_source_updated_at ON cdc_latency_probe(source_updated_at);
 CREATE INDEX idx_cdc_latency_probe_updated_at ON cdc_latency_probe(updated_at);
+CREATE INDEX idx_cdc_validation_runs_started_at ON cdc_validation_runs(started_at DESC);
+CREATE INDEX idx_cdc_validation_runs_status ON cdc_validation_runs(status);
+CREATE INDEX idx_cdc_validation_check_results_run_id ON cdc_validation_check_results(run_id);
+CREATE INDEX idx_cdc_validation_check_results_check_name ON cdc_validation_check_results(check_name);
+CREATE INDEX idx_cdc_validation_check_results_passed ON cdc_validation_check_results(passed);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
