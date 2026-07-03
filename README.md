@@ -315,6 +315,14 @@ GROUP BY shipment_status;
 
 Dùng `FINAL` khi đối chiếu correctness vì sink tables dùng `ReplacingMergeTree(updated_at)`.
 
+### ClickHouse latest-state và `FINAL`
+
+ClickHouse sink trong dự án này là append/versioned latest-state sink. CDC update từ PostgreSQL tạo thêm version mới trong ClickHouse; `ReplacingMergeTree(updated_at)` dùng `updated_at` để chọn bản mới nhất khi background merge chạy hoặc khi query dùng `FINAL`.
+
+Vì background merge là bất đồng bộ, validation dùng `FINAL` để đọc trạng thái đúng tại thời điểm kiểm tra. `FINAL` có chi phí CPU/RAM cao hơn trên dữ liệu lớn, nên chỉ nên dùng cho correctness query hoặc truy vấn cần độ chính xác tuyệt đối. Dashboard lớn nên dùng aggregate table, materialized view hoặc bảng phục vụ riêng.
+
+Soft delete được biểu diễn bằng `deleted_at`: row active có `deleted_at IS NULL`, row đã xóa logic có `deleted_at IS NOT NULL`. Đây là update logic qua CDC, không phải hard delete vật lý thường xuyên trong ClickHouse.
+
 ## Make Targets
 
 | Command | Mô tả |
@@ -327,6 +335,7 @@ Dùng `FINAL` khi đối chiếu correctness vì sink tables dùng `ReplacingMer
 | `make seed` | Seed PostgreSQL |
 | `make stream` | Chạy fake realtime workload |
 | `make latency` | Đo latency PostgreSQL commit tới ClickHouse visible |
+| `make large-load` | Chạy load test dữ liệu lớn, truyền tham số qua `ARGS="..."` |
 | `make fault-tolerance` | Restart runtime services và kiểm tra CDC recovery |
 | `make ready` | Kiểm tra runtime readiness |
 | `make validate` | Đối chiếu PostgreSQL vs ClickHouse |
@@ -429,6 +438,17 @@ make seed
 make validate
 ```
 
+### HAProxy và giới hạn HA hiện tại
+
+HAProxy hiện cung cấp hai endpoint PostgreSQL:
+
+- Write endpoint route tới `pg-primary`.
+- Read endpoint round-robin tới `pg-replica-1` và `pg-replica-2`.
+
+HAProxy ở đây là TCP proxy/routing layer. Nó không tự promote replica, không quản lý PostgreSQL timeline, không di chuyển logical replication slot và không làm Flink CDC tự failover. Flink CDC job hiện vẫn cấu hình source host là `pg-primary`.
+
+Muốn PostgreSQL HA production-like cần thêm Patroni, repmgr hoặc pg_auto_failover. Muốn CDC failover bền hơn cần thiết kế thêm quanh slot/offset, và có thể bổ sung Kafka hoặc durable log layer để replay.
+
 ## Troubleshooting
 
 ### `make verify` fail với checkpoint timeout
@@ -493,6 +513,9 @@ Dự án tập trung vào local/demo production-like CDC:
 - Đã có Prometheus/Grafana monitoring v2.
 - Đã có CDC validation exporter và alert rules cơ bản.
 - Đã có CDC latency probe, benchmark command và dashboard latency.
+- Đã có fault tolerance test cho TaskManager, JobManager, ClickHouse và validation exporter.
+- Đã có large data load test tới mốc 5GB.
+- Đã có phân tích ClickHouse `ReplacingMergeTree`/`FINAL` và giới hạn HAProxy.
 
 Chưa phải production hoàn chỉnh:
 
@@ -502,6 +525,7 @@ Chưa phải production hoàn chỉnh:
 - Chưa có secret management.
 - Chưa có schema migration automation.
 - Chưa có Kafka buffer layer.
+- Chưa có PostgreSQL automatic failover bằng Patroni/repmgr/pg_auto_failover.
 
 ## Demo Flow Gợi Ý
 

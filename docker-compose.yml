@@ -88,8 +88,8 @@ services:
       CLICKHOUSE_DB: ecommerce_ods
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ""
-      VALIDATION_TIMEOUT: 10
-      CDC_VALIDATION_INTERVAL_SECONDS: 30
+      VALIDATION_TIMEOUT: 60
+      CDC_VALIDATION_INTERVAL_SECONDS: 300
     depends_on:
       pg-primary:
         condition: service_healthy

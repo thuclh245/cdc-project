@@ -29,5 +29,7 @@ scrape_configs:
           - "flink-taskmanager:9249"
 
   - job_name: cdc-validation
+    scrape_interval: 300s
+    scrape_timeout: 240s
     static_configs:
       - targets: ["cdc-validation-exporter:9108"]

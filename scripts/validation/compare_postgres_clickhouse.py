@@ -284,7 +284,7 @@ class ClickHouseHttpClient:
         self.url = f"http://{host}:{port}/?{urlencode({'database': os.getenv('CLICKHOUSE_DB', 'ecommerce_ods')})}"
         self.user = os.getenv("CLICKHOUSE_USER", "default")
         self.password = os.getenv("CLICKHOUSE_PASSWORD", "")
-        self.timeout = float(os.getenv("VALIDATION_TIMEOUT", "10"))
+        self.timeout = float(os.getenv("VALIDATION_TIMEOUT", "60"))
 
     def scalar(self, sql: str, parser: Callable[[str], object]) -> object:
         request = Request(
@@ -314,6 +314,13 @@ def postgres_scalar(conn, sql: str):
         return cursor.fetchone()[0]
 
 
+def configure_postgres_validation_session(conn) -> None:
+    # Large local Docker runs can exhaust the default /dev/shm when PostgreSQL
+    # chooses parallel plans for validation aggregates.
+    with conn.cursor() as cursor:
+        cursor.execute("SET max_parallel_workers_per_gather = 0")
+
+
 def display_value(value: object) -> str:
     if isinstance(value, Decimal):
         return f"{value:.2f}"
@@ -326,6 +333,7 @@ def run_checks_once() -> list[tuple[Check, object, object]]:
     postgres = get_conn()
 
     try:
+        configure_postgres_validation_session(postgres)
         for check in CHECKS:
             pg_value = postgres_scalar(postgres, check.postgres_sql)
             ch_value = clickhouse.scalar(check.clickhouse_sql, check.parser)
