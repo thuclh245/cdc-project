@@ -57,7 +57,6 @@ postgresql:
     - basebackup
   basebackup:
     checkpoint: fast
-    verbose: true
   parameters:
     hot_standby: "on"
     listen_addresses: "*"

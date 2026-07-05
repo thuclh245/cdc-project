@@ -301,12 +301,13 @@ services:
       - --initial-cluster=etcd=http://etcd:2380
       - --initial-cluster-token=cdc-postgres-ha
       - --initial-cluster-state=new
+      - --enable-v2=true
     ports:
       - "2379:2379"
     volumes:
       - etcd_data:/etcd-data
     healthcheck:
-      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl --endpoints=http://localhost:2379 endpoint health >/dev/null"]
+      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
       interval: 5s
       timeout: 3s
       retries: 30

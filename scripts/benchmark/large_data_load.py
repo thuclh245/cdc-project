@@ -851,7 +851,7 @@ def build_config(args: argparse.Namespace) -> LoadConfig:
         report_file = Path(args.report_file)
     else:
         today = datetime.now().strftime("%Y-%m-%d")
-        report_file = DEFAULT_REPORT_DIR / f"09_PHASE_4_LARGE_DATA_LOAD_RESULT_{today}.md"
+        report_file = DEFAULT_REPORT_DIR / f"09_LARGE_DATA_LOAD_RESULT_{today}.md"
 
     return LoadConfig(
         run_id=args.run_id or datetime.now().strftime("%Y%m%d%H%M%S"),

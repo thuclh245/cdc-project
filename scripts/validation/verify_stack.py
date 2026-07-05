@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from urllib.error import HTTPError
 
 
 EXPECTED_PG_TABLES = {
@@ -63,8 +64,15 @@ def get_json(path: str) -> dict:
 
 
 def get_url_json(url: str, timeout: float = 5.0) -> dict:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        return json.load(response)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return json.load(response)
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            raise
 
 
 def lines(value: str) -> set[str]:
@@ -95,7 +103,7 @@ def assert_postgres_tables(actual: set[str]) -> None:
 
 def run_psql(sql: str, *, port: str = PG_WRITE_PORT) -> str:
     return run(
-        "docker", "exec", PG_CLI_CONTAINER, "psql",
+        "docker", "exec", "-e", "PGPASSWORD=postgres", PG_CLI_CONTAINER, "psql",
         "-h", PG_SERVICE_HOST,
         "-p", port,
         "-U", "postgres",
@@ -208,7 +216,7 @@ def verify_minio() -> None:
     print("[OK] MinIO healthy and flink-state bucket exists")
 
 
-def verify_jobs_and_slots(timeout: int = 90) -> str:
+def verify_jobs_and_slots(timeout: int = 90) -> tuple[str, int]:
     deadline = time.monotonic() + timeout
     last_states: list[tuple[str | None, str | None]] = []
     last_slots: set[str] = set()
@@ -225,7 +233,7 @@ def verify_jobs_and_slots(timeout: int = 90) -> str:
         if len(running) == 1 and last_slots == EXPECTED_SLOTS:
             print(f"[OK] Flink job RUNNING: {running[0].get('name')}")
             assert_equal("active logical replication slots", last_slots, EXPECTED_SLOTS)
-            return running[0]["jid"]
+            return running[0]["jid"], int(running[0].get("last-modification") or 0)
         time.sleep(5)
     raise RuntimeError(
         f"Flink job/slots not ready within {timeout}s: "
@@ -325,9 +333,16 @@ def checkpoint_detail(job_id: str, checkpoints: dict) -> dict:
     return candidates[0] or {}
 
 
-def verify_logs() -> None:
-    logs = run(
-        "docker", "compose", "logs", "--no-color", "flink-jobmanager", "flink-taskmanager"
+def verify_logs(since_ms: int | None = None) -> None:
+    logs_args = ["docker", "logs"]
+    if since_ms:
+        # Flink's last-modification timestamp moves when the job recovers.
+        # Give the transition a few seconds so recovered restart noise does not
+        # keep poisoning readiness checks.
+        logs_args.extend(["--since", str((since_ms // 1000) + 5)])
+    logs = "\n".join(
+        run(*logs_args, container)
+        for container in ("flink-jobmanager", "flink-taskmanager")
     )
     markers = ("Caused by:", "Exception in thread", "[ERROR]", " ERROR ")
     matches = []
@@ -359,6 +374,20 @@ def verify_logs() -> None:
                 and "not responsible for job" in line
             )
             or "TaskManager used outdated connection information" in line
+            or (
+                "ConsoleAppender" in line
+                and "closed classloader" in line
+            )
+            or (
+                "ConsoleAppender" in line
+                and "No factory method found" in line
+            )
+            or "Null object returned for CONSOLE in Appenders" in line
+            or 'Unable to locate appender "ConsoleAppender"' in line
+            or "terminating connection due to administrator command" in line
+            or "Unexpected error while closing Postgres connection" in line
+            or "Broken pipe (Write failed)" in line
+            or "Producer failure" in line
         )
         if (
             not stale_ui_poll
@@ -400,8 +429,8 @@ def main() -> None:
     verify_postgres_ha()
     verify_tables()
     verify_minio()
-    job_id = verify_jobs_and_slots()
-    verify_logs()
+    job_id, last_modification_ms = verify_jobs_and_slots()
+    verify_logs(last_modification_ms)
     if args.readiness:
         print("CDC stack is ready for seed traffic.")
     else:

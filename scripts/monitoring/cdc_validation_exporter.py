@@ -297,7 +297,7 @@ def load_patroni_nodes() -> dict[str, dict[str, int | str]]:
     for target in [value.strip() for value in raw_nodes.split(",") if value.strip()]:
         node = target.split(":", 1)[0]
         try:
-            with urlopen(f"http://{target}/", timeout=3) as response:
+            with urlopen(f"http://{target}/patroni", timeout=3) as response:
                 payload = json.load(response)
         except Exception:  # noqa: BLE001 - metrics should report node down.
             nodes[node] = {

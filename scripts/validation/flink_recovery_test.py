@@ -341,11 +341,11 @@ def render_report(report: RecoveryReport) -> str:
             f"{status_text(report.jobmanager_validation)} | {report.jobmanager.note} |\n"
         )
 
-    return f"""# Phase 2 result - Flink recovery test
+    return f"""# Flink recovery test result
 
 ## Tóm tắt
 
-Phase 2 đã kiểm tra recovery của Flink CDC job từ checkpoint/savepoint trên MinIO.
+Kiểm thử này xác nhận recovery của Flink CDC job từ checkpoint/savepoint trên MinIO.
 
 - Thời điểm chạy: `{report.started_at}`
 - Baseline job ID: `{report.baseline.job_id or 'n/a'}`

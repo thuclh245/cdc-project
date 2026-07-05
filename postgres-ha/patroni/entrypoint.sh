@@ -9,7 +9,10 @@ set -euo pipefail
 
 mkdir -p "$PATRONI_DATA_DIR" /var/run/postgresql
 chown -R postgres:postgres "$PATRONI_DATA_DIR" /var/run/postgresql
+chmod 700 "$PATRONI_DATA_DIR"
 chmod 775 /var/run/postgresql
+
+rm -f /tmp/patroni.yml
 
 sed \
     -e "s|{{PATRONI_NAME}}|${PATRONI_NAME}|g" \

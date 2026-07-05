@@ -203,8 +203,24 @@ CREATE INDEX idx_cdc_validation_check_results_passed ON cdc_validation_check_res
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
+DECLARE
+    raw_ts TIMESTAMP;
+    safe_fraction_us BIGINT;
+    next_updated_at TIMESTAMP;
 BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
+    raw_ts := clock_timestamp();
+    safe_fraction_us := FLOOR(
+        EXTRACT(EPOCH FROM raw_ts - date_trunc('second', raw_ts)) * 900000
+    )::BIGINT;
+    next_updated_at := date_trunc('second', raw_ts)
+        + INTERVAL '100 milliseconds'
+        + safe_fraction_us * INTERVAL '1 microsecond';
+
+    IF OLD.updated_at IS NOT NULL AND next_updated_at <= OLD.updated_at THEN
+        next_updated_at := OLD.updated_at + INTERVAL '1 microsecond';
+    END IF;
+
+    NEW.updated_at = next_updated_at;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

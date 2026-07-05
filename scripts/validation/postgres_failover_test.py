@@ -122,6 +122,35 @@ def wait_for_flink_running(timeout: float) -> None:
     raise RuntimeError("Flink job did not return to RUNNING")
 
 
+def wait_for_slots_active(timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    expected_slots = {
+        "flink_customers_slot",
+        "flink_categories_slot",
+        "flink_products_slot",
+        "flink_orders_slot",
+        "flink_order_items_slot",
+        "flink_payments_slot",
+        "flink_shipments_slot",
+        "flink_inventory_movements_slot",
+        "flink_cdc_latency_probe_slot",
+    }
+    while time.monotonic() < deadline:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT slot_name FROM pg_replication_slots WHERE slot_type='logical' AND active"
+                    )
+                    active_slots = {row[0] for row in cursor.fetchall()}
+            if expected_slots.issubset(active_slots):
+                return
+        except Exception:
+            pass
+        time.sleep(2)
+    raise RuntimeError("Logical replication slots did not become active on the new primary")
+
+
 def write_probe(clickhouse: ClickHouseClient, probe_key: str, timeout: float) -> int:
     probe_id = insert_probe(probe_key, f"{probe_key}:{time.time_ns()}")
     if not wait_for_probe(clickhouse, probe_id, timeout):
@@ -150,7 +179,7 @@ def write_report(path: Path, result: FailoverResult) -> None:
     path.write_text(
         "\n".join(
             [
-                "# Phase 7 - PostgreSQL HA failover result",
+                "# PostgreSQL HA failover result",
                 "",
                 f"- Status: {result.status}",
                 f"- Primary before: {result.primary_before}",
@@ -186,7 +215,7 @@ def write_report(path: Path, result: FailoverResult) -> None:
 
 def run_test(args: argparse.Namespace) -> FailoverResult:
     clickhouse = ClickHouseClient()
-    probe_key = f"phase7-failover-{socket.gethostname()}-{int(time.time())}"
+    probe_key = f"postgres-ha-failover-{socket.gethostname()}-{int(time.time())}"
     stopped_primary = ""
     primary_before = ""
     primary_after = ""
@@ -208,6 +237,7 @@ def run_test(args: argparse.Namespace) -> FailoverResult:
         primary_after, recovery_seconds = wait_for_new_primary(primary_before, args.timeout)
         wait_for_haproxy_write(args.timeout)
         wait_for_flink_running(args.timeout)
+        wait_for_slots_active(args.timeout)
 
         post_probe_id = write_probe(clickhouse, f"{probe_key}-after", args.probe_timeout)
         if not args.skip_validation:
